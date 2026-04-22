@@ -41,24 +41,43 @@ const initializeKeys = () => {
       return;
     }
 
-    // Fall back to file-based keys (development)
+    // Fall back to file-based keys
     if (!fs.existsSync(keysDir)) {
       fs.mkdirSync(keysDir, { recursive: true });
-      logger.warn('Keys directory created. Run: npm run generate:keys');
-      throw new Error('RSA keys not found. Run: npm run generate:keys');
     }
 
     const privateKeyPath = path.join(keysDir, 'private.pem');
     const publicKeyPath = path.join(keysDir, 'public.pem');
 
+    // Generate keys if they don't exist
     if (!fs.existsSync(privateKeyPath) || !fs.existsSync(publicKeyPath)) {
-      logger.error('RSA keys not found in keys directory');
-      throw new Error(`Keys not found at ${keysDir}. Run: npm run generate:keys`);
-    }
+      logger.warn('RSA keys not found. Generating new keys...');
+      const crypto = require('crypto');
+      
+      // Generate RSA keypair synchronously
+      const { publicKey: pub, privateKey: priv } = crypto.generateKeyPairSync('rsa', {
+        modulusLength: 4096,
+        publicKeyEncoding: {
+          type: 'spki',
+          format: 'pem'
+        },
+        privateKeyEncoding: {
+          type: 'pkcs8',
+          format: 'pem'
+        }
+      });
 
-    privateKey = fs.readFileSync(privateKeyPath, 'utf8');
-    publicKey = fs.readFileSync(publicKeyPath, 'utf8');
-    logger.info('JWT keys loaded from files');
+      fs.writeFileSync(privateKeyPath, priv, 'utf8');
+      fs.writeFileSync(publicKeyPath, pub, 'utf8');
+      logger.info('New RSA keys generated and saved');
+      
+      privateKey = priv;
+      publicKey = pub;
+    } else {
+      privateKey = fs.readFileSync(privateKeyPath, 'utf8');
+      publicKey = fs.readFileSync(publicKeyPath, 'utf8');
+      logger.info('JWT keys loaded from files');
+    }
   } catch (error) {
     logger.error('Failed to initialize JWT keys:', { message: error.message });
     throw error;
