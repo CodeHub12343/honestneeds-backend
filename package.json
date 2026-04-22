@@ -26,7 +26,7 @@
     "db:migrate": "node scripts/migrate.js",
     "db:migrate:rollback": "node scripts/migrationRollback.js",
     "generate:keys": "node scripts/generateKeys.js",
-    "prepare": "husky install",
+    "prepare": "[ -z $CI ] && husky install || true",
     "test:day5": "jest tests/day5-integration-testing.test.js --detectOpenHandles --verbose",
     "test:day5:watch": "jest tests/day5-integration-testing.test.js --watch --verbose",
     "test:day5:coverage": "jest tests/day5-integration-testing.test.js --coverage",

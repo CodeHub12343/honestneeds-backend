@@ -8,8 +8,8 @@ RUN apk add --no-cache dumb-init
 # Copy package files
 COPY package.json package-lock.json ./
 
-# Install production dependencies
-RUN npm ci --only=production
+# Install production dependencies (skip prepare/postinstall scripts)
+RUN npm ci --only=production --ignore-scripts
 
 # Copy application code
 COPY src ./src
