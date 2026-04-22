@@ -13,7 +13,7 @@ const Transaction = require('../models/Transaction');
 const { ShareRecord } = require('../models/Share');
 const ShareWithdrawal = require('../models/ShareWithdrawal');
 const StripeService = require('../services/StripeService');
-const PaymentService = require('../services/PaymentService');
+const paymentService = require('../services/paymentService');
 const emailService = require('../services/emailService');
 const { logger } = require('../utils/logger');
 
