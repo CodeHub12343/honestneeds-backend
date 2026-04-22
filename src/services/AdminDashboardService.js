@@ -313,7 +313,7 @@ class AdminDashboardService {
    */
   static async getAuditLogs(filters, options) {
     try {
-      const AdminAuditLog = require('../models/AdminAuditLog');
+      const AuditLog = require('../models/AuditLog');
 
       const query = {};
 
@@ -330,11 +330,11 @@ class AdminDashboardService {
       const skip = (options.page - 1) * options.limit;
 
       const [logs, total] = await Promise.all([
-        AdminAuditLog.find(query)
+        AuditLog.find(query)
           .sort({ timestamp: -1 })
           .skip(skip)
           .limit(options.limit),
-        AdminAuditLog.countDocuments(query)
+        AuditLog.countDocuments(query)
       ]);
 
       // Count actions by type for summary
@@ -516,13 +516,13 @@ class AdminDashboardService {
    */
   static async logAuditTrail(logData) {
     try {
-      const AdminAuditLog = require('../models/AdminAuditLog');
+      const AuditLog = require('../models/AuditLog');
       const User = require('../models/User');
 
       // Get admin name for logging
       const admin = await User.findById(logData.adminId).select('firstName lastName email');
 
-      const log = new AdminAuditLog({
+      const log = new AuditLog({
         adminId: logData.adminId,
         adminName: admin ? `${admin.firstName} ${admin.lastName}` : 'Unknown',
         adminEmail: admin ? admin.email : '',

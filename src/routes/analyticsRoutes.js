@@ -14,13 +14,13 @@
  * 
  * @requires express
  * @requires ../middleware/auth
- * @requires ../controllers/AnalyticsController
+ * @requires ../controllers/analyticsController
  */
 
 const express = require('express');
 const router = express.Router();
 const { authenticate, authorize } = require('../middleware/authMiddleware');
-const AnalyticsController = require('../controllers/AnalyticsController');
+const analyticsController = require('../controllers/analyticsController');
 
 // ============================================
 // QR CODE ROUTES
@@ -56,7 +56,7 @@ const AnalyticsController = require('../controllers/AnalyticsController');
  *   "message": "QR code generated successfully"
  * }
  */
-router.post('/qr/generate', authenticate, AnalyticsController.generateQRCode);
+router.post('/qr/generate', authenticate, analyticsController.generateQRCode);
 
 /**
  * GET /api/analytics/qr/:id/analytics
@@ -93,7 +93,7 @@ router.post('/qr/generate', authenticate, AnalyticsController.generateQRCode);
  *   }
  * }
  */
-router.get('/qr/:id/analytics', authenticate, AnalyticsController.getQRAnalytics);
+router.get('/qr/:id/analytics', authenticate, analyticsController.getQRAnalytics);
 
 /**
  * POST /api/analytics/qr/scan
@@ -130,7 +130,7 @@ router.get('/qr/:id/analytics', authenticate, AnalyticsController.getQRAnalytics
  *   "message": "QR scan tracked and sweepstakes entry awarded"
  * }
  */
-router.post('/qr/scan', AnalyticsController.trackQRScan);
+router.post('/qr/scan', analyticsController.trackQRScan);
 
 // ============================================
 // CAMPAIGN SPECIFIC ANALYTICS ROUTES
@@ -164,7 +164,7 @@ router.post('/qr/scan', AnalyticsController.trackQRScan);
  *   "message": "Flyer data generated successfully"
  * }
  */
-router.get('/campaigns/:id/flyer', authenticate, AnalyticsController.generateFlyer);
+router.get('/campaigns/:id/flyer', authenticate, analyticsController.generateFlyer);
 
 /**
  * GET /api/analytics/campaigns/:id/share-analytics
@@ -216,7 +216,7 @@ router.get('/campaigns/:id/flyer', authenticate, AnalyticsController.generateFly
  *   }
  * }
  */
-router.get('/campaigns/:id/share-analytics', authenticate, AnalyticsController.getShareAnalytics);
+router.get('/campaigns/:id/share-analytics', authenticate, analyticsController.getShareAnalytics);
 
 /**
  * GET /api/analytics/campaigns/:id/donation-analytics
@@ -263,7 +263,7 @@ router.get('/campaigns/:id/share-analytics', authenticate, AnalyticsController.g
  *   }
  * }
  */
-router.get('/campaigns/:id/donation-analytics', authenticate, AnalyticsController.getDonationAnalytics);
+router.get('/campaigns/:id/donation-analytics', authenticate, analyticsController.getDonationAnalytics);
 
 // ============================================
 // PUBLIC & ADMIN ANALYTICS ROUTES
@@ -298,7 +298,7 @@ router.get('/campaigns/:id/donation-analytics', authenticate, AnalyticsControlle
  *   }
  * }
  */
-router.get('/trending', AnalyticsController.getTrendingCampaigns);
+router.get('/trending', analyticsController.getTrendingCampaigns);
 
 /**
  * GET /api/analytics/user-activity
@@ -330,7 +330,7 @@ router.get('/trending', AnalyticsController.getTrendingCampaigns);
  *   }
  * }
  */
-router.get('/user-activity', authenticate, authorize('admin'), AnalyticsController.getUserActivity);
+router.get('/user-activity', authenticate, authorize('admin'), analyticsController.getUserActivity);
 
 /**
  * GET /api/analytics/export
@@ -365,7 +365,7 @@ router.get('/user-activity', authenticate, authorize('admin'), AnalyticsControll
  *   "timestamp": "2026-04-04T10:00:00Z"
  * }
  */
-router.get('/export', authenticate, authorize('admin'), AnalyticsController.exportAnalytics);
+router.get('/export', authenticate, authorize('admin'), analyticsController.exportAnalytics);
 
 // ============================================
 // PLATFORM ANALYTICS ROUTES
@@ -408,7 +408,7 @@ router.get('/export', authenticate, authorize('admin'), AnalyticsController.expo
  *   }
  * }
  */
-router.get('/dashboard', AnalyticsController.getDashboard);
+router.get('/dashboard', analyticsController.getDashboard);
 
 /**
  * GET /api/analytics/campaign-performance
@@ -442,7 +442,7 @@ router.get('/dashboard', AnalyticsController.getDashboard);
  *   }
  * }
  */
-router.get('/campaign-performance', AnalyticsController.getCampaignPerformance);
+router.get('/campaign-performance', analyticsController.getCampaignPerformance);
 
 /**
  * GET /api/analytics/donation-trends
@@ -478,7 +478,7 @@ router.get('/campaign-performance', AnalyticsController.getCampaignPerformance);
  *   }
  * }
  */
-router.get('/donation-trends', AnalyticsController.getDonationTrends);
+router.get('/donation-trends', analyticsController.getDonationTrends);
 
 /**
  * GET /api/analytics/revenue
@@ -515,7 +515,7 @@ router.get('/donation-trends', AnalyticsController.getDonationTrends);
  *   }
  * }
  */
-router.get('/revenue', authenticate, authorize('admin'), AnalyticsController.getRevenue);
+router.get('/revenue', authenticate, authorize('admin'), analyticsController.getRevenue);
 
 module.exports = router;
 
