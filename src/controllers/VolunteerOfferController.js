@@ -1,5 +1,5 @@
 ﻿const { logger } = require('../utils/logger');
-const volunteerService = require('../services/volunteerService');
+const volunteerService = require('../services/VolunteerService');
 const {
   validateCreateVolunteerOffer,
   validateGetCampaignVolunteers,
