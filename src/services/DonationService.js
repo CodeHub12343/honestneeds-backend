@@ -591,7 +591,7 @@ class DonationService {
       // Notify donor about refund if requested
       if (notifyDonor) {
         const donor = await User.findById(donation.supporter_id);
-        const emailService = require('./EmailService');
+        const emailService = require('./emailService');
         if (emailService && donor.email) {
           await emailService.sendRefundEmail(donor.email, {
             donationId: donation.transaction_id,

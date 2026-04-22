@@ -3,7 +3,7 @@
  * HTTP handlers for campaign analytics endpoints
  */
 
-const AnalyticsService = require('../services/analyticsService');
+const analyticsService = require('../services/analyticsService');
 const analyticsCache = require('../utils/analyticsCache');
 const Campaign = require('../models/Campaign');
 const Transaction = require('../models/Transaction');
@@ -89,13 +89,13 @@ const AnalyticsController = {
       const startTime = Date.now();
 
       // Get standard analytics
-      const standardAnalytics = await AnalyticsService.getAnalytics(campaign._id, {
+      const standardAnalytics = await analyticsService.getAnalytics(campaign._id, {
         includeProgress: true,
         progressDays,
       });
 
       // Get enhanced analytics with fees and timeline
-      const enhancedAnalytics = await AnalyticsService.getCampaignAnalyticsWithFees(campaign._id, {
+      const enhancedAnalytics = await analyticsService.getCampaignAnalyticsWithFees(campaign._id, {
         includeTimeline: true,
         includeRecent: true,
         recentLimit: 20,
@@ -219,7 +219,7 @@ const AnalyticsController = {
       }
 
       // Get trend data
-      const trend = await AnalyticsService.getProgressTrend(campaign._id, start, end);
+      const trend = await analyticsService.getProgressTrend(campaign._id, start, end);
 
       winstonLogger.info('Progress trend retrieved', {
         campaignId: campaign._id,
@@ -301,7 +301,7 @@ const AnalyticsController = {
       }
 
       // Get comparison
-      const comparison = await AnalyticsService.getMetricsComparison(campaign._id, days);
+      const comparison = await analyticsService.getMetricsComparison(campaign._id, days);
 
       winstonLogger.info('Metrics comparison retrieved', {
         campaignId: campaign._id,
@@ -1358,7 +1358,7 @@ const AnalyticsController = {
     try {
       const { period = 'month' } = req.query;
 
-      const metrics = await AnalyticsService.getDashboardMetrics({ period });
+      const metrics = await analyticsService.getDashboardMetrics({ period });
 
       return res.status(200).json({
         success: true,
@@ -1388,7 +1388,7 @@ const AnalyticsController = {
     try {
       const { sort = 'donations', limit = 10 } = req.query;
 
-      const campaigns = await AnalyticsService.getCampaignPerformance({
+      const campaigns = await analyticsService.getCampaignPerformance({
         sort,
         limit: Math.min(100, parseInt(limit) || 10)
       });
@@ -1424,7 +1424,7 @@ const AnalyticsController = {
     try {
       const { period = 'day', days = 30, groupBy = 'date' } = req.query;
 
-      const trends = await AnalyticsService.getDonationTrends({
+      const trends = await analyticsService.getDonationTrends({
         period,
         days: Math.min(365, parseInt(days) || 30),
         groupBy
@@ -1467,7 +1467,7 @@ const AnalyticsController = {
 
       const { period = 'month', detailed = false } = req.query;
 
-      const revenue = await AnalyticsService.getRevenueBreakdown({
+      const revenue = await analyticsService.getRevenueBreakdown({
         period,
         detailed: detailed === 'true' || detailed === true
       });

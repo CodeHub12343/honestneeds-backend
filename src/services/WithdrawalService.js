@@ -14,7 +14,7 @@ const Withdrawal = require('../models/Withdrawal');
 const PaymentMethod = require('../models/PaymentMethod');
 const Transaction = require('../models/Transaction');
 const winstonLogger = require('../utils/winstonLogger');
-const emailService = require('./EmailService');
+const emailService = require('./emailService');
 const WalletService = require('./WalletService');
 
 class WithdrawalService {

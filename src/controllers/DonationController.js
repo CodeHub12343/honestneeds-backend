@@ -4,7 +4,7 @@ const Campaign = require('../models/Campaign');
 const User = require('../models/User');
 const TransactionService = require('../services/TransactionService');
 const FeeTrackingService = require('../services/FeeTrackingService');
-const PaymentService = require('../services/PaymentService');
+const paymentService = require('../services/paymentService');
 const logger = require('../utils/winstonLogger');
 
 /**
