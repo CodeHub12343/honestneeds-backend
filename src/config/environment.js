@@ -31,18 +31,13 @@ const REQUIRED_VARS = {
     'RATE_LIMIT_MAX_REQUESTS',
   ],
   production: [
-    'SENDGRID_API_KEY',
-    'SENDGRID_FROM_EMAIL',
-    'AWS_REGION',
-    'AWS_ACCESS_KEY_ID',
-    'AWS_SECRET_ACCESS_KEY',
-    'S3_BUCKET',
+    // Core requirements
     'STRIPE_API_KEY',
-    'PAYPAL_CLIENT_ID',
-    'PAYPAL_CLIENT_SECRET',
-    'ADMIN_EMAIL',
-    'SUPPORT_EMAIL',
-    'SENTRY_DSN',
+    // Optional services (can be added later):
+    // 'SENDGRID_API_KEY', // Email service - optional
+    // 'SENTRY_DSN', // Error tracking - optional
+    // 'AWS_REGION', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'S3_BUCKET', // Image storage - optional
+    // 'PAYPAL_CLIENT_ID', 'PAYPAL_CLIENT_SECRET', // PayPal - optional
   ],
   staging: [
     'SENDGRID_API_KEY',
