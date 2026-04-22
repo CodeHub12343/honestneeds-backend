@@ -1,0 +1,756 @@
+{
+  "project": {
+    "name": "HonestNeed Coming Soon Landing Page",
+    "description": "High-converting coming soon page for HonestNeed platform - community-driven fundraising and helping movement",
+    "createdDate": "2026-04-05",
+    "purpose": "Build anticipation, collect early adopter emails, showcase 3 premium offers, and drive movement participation before full platform launch"
+  },
+  
+  "techStack": {
+    "framework": "Next.js 16.2.2 (App Router)",
+    "library": "React 19.2.4",
+    "styling": "Styled Components 6.1.11 + Tailwind CSS 4",
+    "stateManagement": "Zustand (auth), React Query (data fetching)",
+    "animations": "Framer Motion 11.x",
+    "forms": "React Hook Form + Zod validation",
+    "deployment": "Vercel"
+  },
+
+  "designSystem": {
+    "colorPalette": {
+      "primary": {
+        "main": "#6366F1",
+        "light": "#818CF8",
+        "dark": "#4F46E5",
+        "veryLight": "#E0E7FF"
+      },
+      "secondary": {
+        "main": "#F43F5E",
+        "light": "#FB7185",
+        "dark": "#E11D48",
+        "veryLight": "#FFE4E6"
+      },
+      "accent": {
+        "main": "#F59E0B",
+        "light": "#FBBF24",
+        "dark": "#D97706",
+        "veryLight": "#FEF3C7"
+      },
+      "neutral": {
+        "50": "#F9FAFB",
+        "100": "#F3F4F6",
+        "200": "#E5E7EB",
+        "300": "#D1D5DB",
+        "400": "#9CA3AF",
+        "500": "#6B7280",
+        "600": "#4B5563",
+        "700": "#374151",
+        "800": "#1F2937",
+        "900": "#111827"
+      },
+      "semanticColors": {
+        "success": "#10B981",
+        "warning": "#F59E0B",
+        "error": "#EF4444",
+        "info": "#3B82F6"
+      }
+    },
+
+    "typography": {
+      "fontFamily": {
+        "heading": "'Inter', system-ui, sans-serif",
+        "body": "'Inter', system-ui, sans-serif",
+        "mono": "'Fira Code', monospace"
+      },
+      "scale": {
+        "displayXL": {
+          "fontSize": "clamp(2.5rem, 5vw, 5rem)",
+          "lineHeight": "1.2",
+          "fontWeight": 800,
+          "letterSpacing": "-0.02em"
+        },
+        "displayLG": {
+          "fontSize": "clamp(2rem, 4vw, 3.75rem)",
+          "lineHeight": "1.2",
+          "fontWeight": 700
+        },
+        "h1": {
+          "fontSize": "clamp(1.75rem, 3.5vw, 3rem)",
+          "lineHeight": "1.2",
+          "fontWeight": 700
+        },
+        "h2": {
+          "fontSize": "clamp(1.5rem, 3vw, 2.25rem)",
+          "lineHeight": "1.3",
+          "fontWeight": 700
+        },
+        "h3": {
+          "fontSize": "clamp(1.25rem, 2.5vw, 1.875rem)",
+          "lineHeight": "1.4",
+          "fontWeight": 600
+        },
+        "bodyLG": {
+          "fontSize": "1.125rem",
+          "lineHeight": "1.8",
+          "fontWeight": 400
+        },
+        "body": {
+          "fontSize": "1rem",
+          "lineHeight": "1.75",
+          "fontWeight": 400
+        },
+        "bodySM": {
+          "fontSize": "0.875rem",
+          "lineHeight": "1.6",
+          "fontWeight": 400
+        }
+      }
+    },
+
+    "spacing": {
+      "xs": "0.25rem",
+      "sm": "0.5rem",
+      "md": "1rem",
+      "lg": "1.5rem",
+      "xl": "2rem",
+      "2xl": "2.5rem",
+      "3xl": "3rem",
+      "4xl": "4rem",
+      "5xl": "5rem",
+      "6xl": "6rem"
+    },
+
+    "borderRadius": {
+      "none": "0",
+      "sm": "0.25rem",
+      "md": "0.5rem",
+      "lg": "1rem",
+      "xl": "1.5rem",
+      "2xl": "2rem",
+      "full": "9999px"
+    },
+
+    "shadows": {
+      "sm": "0 1px 2px 0 rgba(0, 0, 0, 0.05)",
+      "md": "0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)",
+      "lg": "0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)",
+      "xl": "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
+      "2xl": "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
+      "glow": "0 0 20px rgba(99, 102, 241, 0.4)"
+    },
+
+    "animations": {
+      "transitions": {
+        "fast": "150ms cubic-bezier(0.4, 0, 0.2, 1)",
+        "base": "200ms cubic-bezier(0.4, 0, 0.2, 1)",
+        "slow": "300ms cubic-bezier(0.4, 0, 0.2, 1)"
+      }
+    }
+  },
+
+  "pageStructure": {
+    "layout": "Full viewport sections with fixed header, mobile-optimized navigation",
+    "mobileBreakpoints": {
+      "xs": "320px",
+      "sm": "640px",
+      "md": "768px",
+      "lg": "1024px",
+      "xl": "1280px",
+      "2xl": "1536px"
+    },
+    "sections": [
+      {
+        "id": "header",
+        "type": "sticky-navigation",
+        "mobileHeight": "3.5rem",
+        "desktopHeight": "4rem",
+        "content": [
+          "Logo with link to home",
+          "Nav items: 'How it Works', 'Early Access', responsive menu toggle"
+        ]
+      },
+      {
+        "id": "hero",
+        "type": "full-screen-hero",
+        "minHeight": "100vh",
+        "mobileHeight": "auto",
+        "content": {
+          "headline": "Join the Movement for Real Help",
+          "subheadline": "HonestNeed connects communities with people who need support. Coming soon.",
+          "cta": "Get Early Access",
+          "secondary_cta": "Learn More",
+          "backgroundPattern": "Animated gradient mesh or subtle grid pattern",
+          "visualElement": "Animated illustrations or hero image carousel"
+        }
+      },
+      {
+        "id": "problem",
+        "type": "content-section",
+        "layout": "text-left with side illustration",
+        "content": {
+          "headline": "Why HonestNeed Matters",
+          "description": "Traditional fundraising is complex, opaque, and often fails those who need it most",
+          "problems": [
+            {
+              "icon": "TrendingUp",
+              "title": "High Barriers",
+              "description": "Complex platforms make it hard for people to ask for help"
+            },
+            {
+              "icon": "Eye",
+              "title": "Lack of Transparency",
+              "description": "Unclear where funds go and how they're used"
+            },
+            {
+              "icon": "Heart",
+              "title": "No Community",
+              "description": "Donors disconnected from real impact"
+            }
+          ]
+        }
+      },
+      {
+        "id": "solution",
+        "type": "content-section",
+        "layout": "text-right with side illustration",
+        "content": {
+          "headline": "Meet Your Solution",
+          "description": "Transparent, community-driven fundraising for real needs",
+          "features": [
+            {
+              "icon": "Zap",
+              "title": "Simple Setup",
+              "description": "Start a campaign in minutes, not hours"
+            },
+            {
+              "icon": "ShieldCheck",
+              "title": "Verified & Safe",
+              "description": "Every campaign verified for authenticity and safety"
+            },
+            {
+              "icon": "Users",
+              "title": "Community Powered",
+              "description": "Earn by sharing campaigns with your network"
+            }
+          ]
+        }
+      },
+      {
+        "id": "earlyOffers",
+        "type": "premium-offers-section",
+        "layout": "3-column grid (responsive: 1 col mobile, 2 col tablet, 3 col desktop)",
+        "content": {
+          "headline": "Launch Offers: Limited Early Access",
+          "subtitle": "Be among the first to access HonestNeed. Choose your commitment level.",
+          "offers": [
+            {
+              "name": "Supporter",
+              "price": "$9.99",
+              "frequency": "one-time",
+              "description": "Help launch HonestNeed",
+              "features": [
+                "Early access to platform",
+                "Founder badge on your profile",
+                "Email community updates"
+              ],
+              "callToAction": "Become a Supporter",
+              "accent": "secondary"
+            },
+            {
+              "name": "Champion",
+              "price": "$49.99",
+              "frequency": "one-time",
+              "description": "Lead the movement",
+              "features": [
+                "Everything in Supporter",
+                "Premium profile badge",
+                "Exclusive Champions group",
+                "Priority campaign verification",
+                "15% boost bonus on campaigns"
+              ],
+              "callToAction": "Become a Champion",
+              "accent": "primary",
+              "highlighted": true,
+              "badgeText": "Most Popular"
+            },
+            {
+              "name": "Visionary",
+              "price": "$199.99",
+              "frequency": "one-time",
+              "description": "Shape the future",
+              "features": [
+                "Everything in Champion",
+                "Lifetime VIP status",
+                "1-on-1 onboarding call",
+                "Custom profile banner",
+                "30% boost bonus",
+                "Monthly feedback sessions with team"
+              ],
+              "callToAction": "Become a Visionary",
+              "accent": "accent"
+            }
+          ]
+        }
+      },
+      {
+        "id": "howItWorks",
+        "type": "step-by-step-section",
+        "layout": "vertical timeline (stacked on mobile, horizontal on desktop)",
+        "content": {
+          "headline": "How HonestNeed Works",
+          "steps": [
+            {
+              "step": 1,
+              "title": "Share Your Need (or Opportunity)",
+              "description": "Tell your story with photos, details, and what you're raising for",
+              "icon": "MessageCircle"
+            },
+            {
+              "step": 2,
+              "title": "Build Community Support",
+              "description": "Share with your network and earn rewards as they donate",
+              "icon": "Share2"
+            },
+            {
+              "step": 3,
+              "title": "Track Impact",
+              "description": "Get real-time updates as your community helps you succeed",
+              "icon": "TrendingUp"
+            },
+            {
+              "step": 4,
+              "title": "Share Success",
+              "description": "Show appreciation and celebrate milestones with your community",
+              "icon": "Heart"
+            }
+          ]
+        }
+      },
+      {
+        "id": "testimonials",
+        "type": "social-proof-section",
+        "layout": "carousel or scrollable grid",
+        "content": {
+          "headline": "Voices of Change",
+          "subtitle": "Early testers share their experience with HonestNeed",
+          "testimonials": [
+            {
+              "quote": "I was able to share my story and my community responded. HonestNeed made it easy.",
+              "author": "Maria, Creator (Beta Tester)",
+              "role": "Emergency Support Campaign",
+              "avatar": "avatar-placeholder"
+            },
+            {
+              "quote": "Knowing my donation directly helps someone I know - this is real impact.",
+              "author": "James, Donor (Beta Tester)",
+              "role": "Community Member",
+              "avatar": "avatar-placeholder"
+            },
+            {
+              "quote": "The transparency and community feel sets HonestNeed apart.",
+              "author": "Lisa, Advocate (Beta Tester)",
+              "role": "Social Impact Champion",
+              "avatar": "avatar-placeholder"
+            }
+          ]
+        }
+      },
+      {
+        "id": "stats",
+        "type": "metrics-section",
+        "layout": "4-column grid (responsive)",
+        "content": {
+          "stats": [
+            {
+              "value": "500+",
+              "label": "Beta Users",
+              "icon": "Users"
+            },
+            {
+              "value": "$50K+",
+              "label": "Funds Raised",
+              "icon": "DollarSign"
+            },
+            {
+              "value": "95%",
+              "label": "Satisfaction Rate",
+              "icon": "Star"
+            },
+            {
+              "value": "48 Hours",
+              "label": "Avg Campaign Launch",
+              "icon": "Clock"
+            }
+          ]
+        }
+      },
+      {
+        "id": "newsletter",
+        "type": "email-capture-section",
+        "layout": "centered content block",
+        "content": {
+          "headline": "Join the Movement",
+          "description": "Get exclusive updates, early features, and be first to know when we launch.",
+          "form": {
+            "fields": [
+              {
+                "name": "email",
+                "type": "email",
+                "placeholder": "Your email address",
+                "required": true
+              },
+              {
+                "name": "firstName",
+                "type": "text",
+                "placeholder": "First name (optional)",
+                "required": false
+              }
+            ],
+            "button": "Get Early Access",
+            "successMessage": "Thanks for joining! Check your email for exclusive updates.",
+            "validation": "Email required, max 254 chars"
+          }
+        }
+      },
+      {
+        "id": "faq",
+        "type": "accordion-section",
+        "layout": "single column, expandable items",
+        "content": {
+          "headline": "Common Questions",
+          "faqs": [
+            {
+              "question": "When does HonestNeed launch?",
+              "answer": "We're launching in [DATE]. Early access members get first priority onboarding!"
+            },
+            {
+              "question": "Are the $9.99, $49.99, and $199.99 purchases refundable?",
+              "answer": "Yes, we offer a 30-day money-back guarantee. No questions asked. Your email will receive a refund link."
+            },
+            {
+              "question": "What happens to my personal data?",
+              "answer": "Your privacy is paramount. We follow GDPR and state privacy regulations. Data is never sold."
+            },
+            {
+              "question": "Can I use HonestNeed as a donor and creator?",
+              "answer": "Absolutely! Many users do both - give to others and also share their own needs."
+            },
+            {
+              "question": "How are campaigns verified?",
+              "answer": "Our team verifies each campaign manually. We check identities and legitimacy before approval."
+            },
+            {
+              "question": "Is there a creator fee?",
+              "answer": "No creator fees. We're free to use. Donors choose to give - no algorithms pushing more money out."
+            }
+          ]
+        }
+      },
+      {
+        "id": "cta-final",
+        "type": "final-cta-section",
+        "layout": "centered hero-style block",
+        "content": {
+          "headline": "Ready to Be Part of the Change?",
+          "description": "Limited early access available. Get your spot before we reach capacity.",
+          "primaryCTA": "Get Early Access Now",
+          "secondaryCTA": "Learn More",
+          "backgroundPattern": "Subtle animated gradient"
+        }
+      },
+      {
+        "id": "footer",
+        "type": "footer",
+        "layout": "responsive grid with mobile stacking",
+        "content": [
+          "Company info and mission statement",
+          "Links: Privacy, Terms, Contact, About",
+          "Social media links (Twitter, LinkedIn, Instagram, TikTok)",
+          "Copyright notice",
+          "Newsletter signup reminder"
+        ]
+      }
+    ]
+  },
+
+  "animationGuidelines": {
+    "framework": "Framer Motion",
+    "patterns": {
+      "entrance": "Staggered fade-in with subtle slide-up (100px to 0px, opacity 0 to 1)",
+      "scroll": "Parallax effects on hero, fade-in on scroll for section headlines",
+      "interactive": "Button hover scale (1 to 1.05), color transitions (200ms)",
+      "carousel": "Smooth drag gestures, momentum scrolling on mobile",
+      "countdownTimer": "Smooth number transitions with digit-swap animation",
+      "hoverEffects": {
+        "cards": "Scale 1.02, shadow elevation, subtle shadow glow",
+        "buttons": "Scale 1.05, color shift, shadow expansion",
+        "links": "Underline animation from left to right"
+      }
+    },
+    "performanceGuidelines": [
+      "Use transform and opacity for animations (GPU accelerated)",
+      "Debounce scroll listeners",
+      "Lazy load images and sections below fold",
+      "Reduce motion for users with prefers-reduced-motion"
+    ]
+  },
+
+  "mobileResponsiveness": {
+    "strategy": "Mobile-first approach with progressive enhancement",
+    "guidelines": {
+      "xs_to_sm": "Single column, full width sections, large touch targets (44x44px min)",
+      "sm_to_md": "Single to 2-column layouts, optimized spacing",
+      "md_to_lg": "Multi-column layouts, desktop-like features",
+      "touch_interactions": "Swipe for carousels, tap for accordions, bottom sheet modals",
+      "typography": "Readable sizes at all breakpoints, line lengths max 50-75 chars on desktop",
+      "images": "Responsive srcSet, WebP with fallbacks, lazy loading",
+      "navbar": "Hamburger menu on mobile (< 768px), full nav on desktop",
+      "spacing": "Tighter spacing on mobile (8px base unit), generous on desktop (16px)"
+    }
+  },
+
+  "componentSpecifications": {
+    "header": {
+      "sticky": true,
+      "elements": ["Logo", "NavMenu (desktop)", "HamburgerMenu (mobile)", "CTAButton"],
+      "styling": "Subtle blur background, border-bottom on scroll",
+      "responsive": "Mobile: hamburger + logo, Desktop: full nav + logo"
+    },
+
+    "heroSection": {
+      "layout": "Center-aligned content with background visuals",
+      "elements": [
+        "Headline (displayXL)",
+        "Subheadline (bodyLG, muted)",
+        "CTA Button (primary)",
+        "Secondary Button (outline)",
+        "Background: Animated gradient mesh or hero image"
+      ],
+      "animations": "Content fades in on load, background subtly moves on scroll",
+      "minHeight": "100vh"
+    },
+
+    "offerCards": {
+      "layout": "3 cards, each with pricing, features, CTA",
+      "highlightedCard": "Larger scale, different accent color, badge",
+      "features": "Checkmark icons + text, truncated with 'see more' on mobile",
+      "interactivity": "Hover scale, shadow elevation, price highlight color"
+    },
+
+    "stepTimeline": {
+      "layout": "Vertical (mobile) to horizontal (desktop)",
+      "elements": "Step number, icon, title, description, connector lines",
+      "animation": "Staggered staggered-in on scroll from bottom"
+    },
+
+    "testimonialCarousel": {
+      "layout": "Scrollable on mobile, grid on desktop",
+      "card": "Quote, author, role, avatar, star rating",
+      "navigation": "Dots on mobile, arrows on desktop, keyboard navigation"
+    },
+
+    "accordion": {
+      "animation": "Smooth height transition (300ms)",
+      "icon": "Chevron rotates on open/close",
+      "styling": "Border-bottom separator, hover background"
+    },
+
+    "newsletter": {
+      "layout": "Email input + button (stacked on mobile, inline on desktop)",
+      "validation": "Real-time email validation, error messages inline",
+      "success": "Toast notification with checkmark animation"
+    },
+
+    "buttons": {
+      "types": ["primary (filled)", "secondary (outline)", "ghost (text-only)"],
+      "sizes": ["sm", "md", "lg"],
+      "states": ["default", "hover", "active", "disabled", "loading"],
+      "animations": "Scale on hover, loading spinner overlay"
+    }
+  },
+
+  "integrationPoints": {
+    "backend_api": {
+      "newsletter_signup": {
+        "endpoint": "POST /api/newsletter/signup",
+        "payload": "{ email, firstName (optional) }",
+        "response": "{ success, message }"
+      },
+      "offer_purchase": {
+        "endpoint": "POST /api/offers/purchase",
+        "payload": "{ offerTier, email, paymentToken }",
+        "response": "{ success, orderId, confirmationEmail }"
+      },
+      "campaign_preview": {
+        "endpoint": "GET /api/campaigns?featured=true&limit=3",
+        "usage": "Display 3 trending campaigns in testimonials or featured section"
+      }
+    },
+    "analytics_tracking": [
+      "Page views",
+      "CTA clicks (newsletter, primary, secondary)",
+      "Offer purchases by tier",
+      "Time on page",
+      "Section scroll depth",
+      "Form abandonment"
+    ],
+    "email_service": "Nodemailer or SendGrid for newsletter confirmations"
+  },
+
+  "contentGuidelines": {
+    "tone": "Warm, inclusive, hopeful, action-oriented",
+    "voice": "Community-focused, transparent, authentic",
+    "messaging_pillars": [
+      "Accessibility: Help is just a few clicks away",
+      "Transparency: Know where funds go",
+      "Community: Real impact with your network",
+      "Trust: Verified and safe for all"
+    ],
+    "callToActions": [
+      "Get Early Access",
+      "Learn More",
+      "Join the Movement",
+      "Become a Founder",
+      "Share the Impact",
+      "Get Your Spot"
+    ]
+  },
+
+  "performanceOptimization": {
+    "imageOptimization": [
+      "Use Next.js Image component",
+      "Serve WebP with fallbacks",
+      "Implement lazy loading",
+      "Optimize for retina displays (2x)",
+      "Typical sizes: Hero (1920x1080), Card (400x300), Avatar (100x100)"
+    ],
+    "codeOptimization": [
+      "Code split at route level",
+      "Lazy load below-fold sections",
+      "Minify and compress assets",
+      "Use CSS-in-JS efficiently with Styled Components",
+      "Avoid layout shifts with size-contain images"
+    ],
+    "targetMetrics": {
+      "LCP": "< 2.5s",
+      "FID": "< 100ms",
+      "CLS": "< 0.1"
+    }
+  },
+
+  "deliverables": {
+    "fileStructure": {
+      "app": {
+        "coming-soon": [
+          "page.jsx (main page component)",
+          "layout.jsx (specific layout)",
+          "metadata.js (SEO)"
+        ]
+      },
+      "components": {
+        "coming-soon": [
+          "Header.jsx",
+          "Hero.jsx",
+          "ProblemSection.jsx",
+          "SolutionSection.jsx",
+          "OffersSection.jsx",
+          "HowItWorksSection.jsx",
+          "TestimonialCarousel.jsx",
+          "StatsSection.jsx",
+          "NewsletterForm.jsx",
+          "FAQSection.jsx",
+          "CTASection.jsx",
+          "Footer.jsx"
+        ]
+      },
+      "styles": [
+        "comingSoon.styles.js (global styled components)",
+        "animations.js (Framer Motion presets)"
+      ],
+      "hooks": [
+        "useNewsletterForm.js (email capture logic)"
+      ]
+    },
+
+    "expectedCode": "~3,500-4,500 lines of component code with Styled Components + Framer Motion",
+    "estimatedLoadTime": "< 2.5s on 3G with optimizations",
+    "responsiveSupport": "Mobile (320px), Tablet (768px), Desktop (1024px+), 4K (2560px+)"
+  },
+
+  "qualityCheckList": {
+    "design": [
+      "✅ Consistent with HonestNeed color palette and tokens",
+      "✅ Typography scale properly implemented",
+      "✅ Whitespace and spacing follows 8px grid system",
+      "✅ All animations smooth and purposeful",
+      "✅ Dark mode support (if required)"
+    ],
+    "functionality": [
+      "✅ Newsletter signup captures emails with validation",
+      "✅ Offer purchase buttons route to payment (Stripe/PayPal)",
+      "✅ All CTAs are clickable and functional",
+      "✅ Form validation and error handling",
+      "✅ Mobile navigation works smoothly"
+    ],
+    "performance": [
+      "✅ Page loads under 2.5s on 3G",
+      "✅ No cumulative layout shift (CLS < 0.1)",
+      "✅ Images optimized and lazy-loaded",
+      "✅ Smooth animations at 60fps",
+      "✅ Mobile touch interactions responsive"
+    ],
+    "accessibility": [
+      "✅ WCAG 2.1 AA compliant",
+      "✅ Keyboard navigation functional",
+      "✅ Screen reader friendly (alt text, ARIA labels)",
+      "✅ Color contrast ratios met (4.5:1 for text)",
+      "✅ Prefers-reduced-motion respected"
+    ],
+    "seo": [
+      "✅ Proper meta tags and Open Graph",
+      "✅ Structured data (JSON-LD)",
+      "✅ Semantic HTML",
+      "✅ Mobile-friendly",
+      "✅ Fast Core Web Vitals"
+    ]
+  },
+
+  "deploymentNotes": {
+    "hosting": "Vercel (recommended for Next.js)",
+    "environment_variables": [
+      "NEXT_PUBLIC_API_URL",
+      "STRIPE_PUBLIC_KEY (for payments)",
+      "SENDGRID_API_KEY (for emails)"
+    ],
+    "testingBefore_Launch": [
+      "Test on real mobile devices (iOS Safari, Chrome Mobile, Samsung Internet)",
+      "Test on slow 3G connection",
+      "Verify email captures are working",
+      "Test payment flows with dummy data",
+      "Load test for traffic spikes",
+      "Check analytics events firing"
+    ]
+  },
+
+  "kimi_instructions": {
+    "you_are": "An expert Next.js + React developer specializing in high-converting landing pages with Styled Components and Framer Motion animations",
+    "generate": [
+      "Production-ready React components with Styled Components",
+      "Proper Framer Motion animations (entrance, scroll, interactive)",
+      "Mobile-responsive layouts using mobile-first approach",
+      "Form validation with React Hook Form + Zod",
+      "All components exported as named exports ready for app router",
+      "Comments explaining complex logic",
+      "Proper error handling and loading states"
+    ],
+    "constraints": [
+      "Must use Styled Components v6.1.11 (not Tailwind for core styling)",
+      "Use Next.js App Router (not Pages Router)",
+      "Framer motion animations must be performant (CPU optimized)",
+      "Mobile-first responsive design",
+      "Accessibility WCAG 2.1 AA compliant",
+      "Maximum bundle size awareness"
+    ],
+    "deliveryFormat": "ES6 module exports, ready to drop into Next.js app/coming-soon/ directory"
+  }
+}

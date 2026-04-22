@@ -1,0 +1,282 @@
+{
+  "info": {
+    "_postman_id": "honestneed-auth-api",
+    "name": "HonestNeed Authentication API",
+    "description": "Complete API collection for HonestNeed authentication endpoints\n\n**Base URL**: {{baseURL}}\n**Environment**: Use development, staging, or production URL\n\n**Setup Instructions**:\n1. Import this collection\n2. Set `baseURL` variable (e.g., http://localhost:5000)\n3. After login, copy the `accessToken` to the `Bearer Token` variable\n4. Protected endpoints will automatically use this token",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Register User",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{$randomEmail}}\",\n  \"password\": \"TestPassword123!\",\n  \"displayName\": \"New User\"\n}"
+            },
+            "url": {
+              "raw": "{{baseURL}}/api/auth/register",
+              "host": [
+                "{{baseURL}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Register a new user account\n\n**Request Body**:\n- `email`: User email address\n- `password`: Password (min 8 chars, 1 uppercase, 1 lowercase, 1 digit, 1 special char)\n- `displayName`: Display name (2-100 chars)\n\n**Response**: Returns user object and auth tokens"
+          },
+          "response": []
+        },
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"TestPassword123!\"\n}"
+            },
+            "url": {
+              "raw": "{{baseURL}}/api/auth/login",
+              "host": [
+                "{{baseURL}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Login with email and password\n\n**Request Body**:\n- `email`: User email\n- `password`: User password\n\n**Response**: Returns user object and auth tokens\n\n**Save response**:\n- Copy `data.accessToken` to `Bearer Token` variable for protected requests"
+          },
+          "response": []
+        },
+        {
+          "name": "Refresh Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseURL}}/api/auth/refresh",
+              "host": [
+                "{{baseURL}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "refresh"
+              ]
+            },
+            "description": "Get a new access token using refresh token\n\n**Request Body**:\n- `refreshToken`: Valid refresh token from login response\n\n**Response**: Returns new access token"
+          },
+          "response": []
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseURL}}/api/auth/logout",
+              "host": [
+                "{{baseURL}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "logout"
+              ]
+            },
+            "description": "Logout user (client-side cleanup)\n\n**Authorization**: Bearer token (optional for POST)"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "User Profile",
+      "item": [
+        {
+          "name": "Get Current User",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseURL}}/api/auth/me",
+              "host": [
+                "{{baseURL}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "me"
+              ]
+            },
+            "description": "Get current authenticated user profile\n\n**Authorization**: Required - Bearer token\n\n**Response**: User object with all profile information"
+          },
+          "response": []
+        },
+        {
+          "name": "Update Profile",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"display_name\": \"Updated Name\",\n  \"bio\": \"Updated biography\",\n  \"phone\": \"+1 (555) 123-4567\",\n  \"avatar_url\": \"https://example.com/avatar.jpg\"\n}"
+            },
+            "url": {
+              "raw": "{{baseURL}}/api/auth/profile",
+              "host": [
+                "{{baseURL}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "profile"
+              ]
+            },
+            "description": "Update user profile (allowed fields only)\n\n**Authorization**: Required - Bearer token\n\n**Allowed Fields**:\n- `display_name`: Display name\n- `bio`: User biography\n- `phone`: Phone number\n- `avatar_url`: Profile image URL\n- `preferences`: Notification preferences\n- `location`: Location object\n\n**Response**: Updated user object"
+          },
+          "response": []
+        },
+        {
+          "name": "Change Password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"OldPassword123!\",\n  \"newPassword\": \"NewPassword456!\"\n}"
+            },
+            "url": {
+              "raw": "{{baseURL}}/api/auth/change-password",
+              "host": [
+                "{{baseURL}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "change-password"
+              ]
+            },
+            "description": "Change user password\n\n**Authorization**: Required - Bearer token\n\n**Request Body**:\n- `currentPassword`: Current password (for verification)\n- `newPassword`: New password (must meet strength requirements)\n\n**Password Requirements**:\n- Minimum 8 characters\n- At least 1 uppercase letter\n- At least 1 lowercase letter\n- At least 1 digit\n- At least 1 special character\n\n**Response**: Success message"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Account",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseURL}}/api/auth/account",
+              "host": [
+                "{{baseURL}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "account"
+              ]
+            },
+            "description": "Delete user account (soft delete)\n\n**Authorization**: Required - Bearer token\n\n**⚠️ Warning**: This action is permanent. Account will be soft-deleted but can be restored by admin.\n\n**Response**: Success message"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseURL}}/health",
+          "host": [
+            "{{baseURL}}"
+          ],
+          "path": [
+            "health"
+          ]
+        },
+        "description": "Check API health status\n\n**Authorization**: Not required\n\n**Response**: Service health information"
+      },
+      "response": []
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseURL",
+      "value": "http://localhost:5000",
+      "type": "string"
+    },
+    {
+      "key": "bearerToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "refreshToken",
+      "value": "",
+      "type": "string"
+    }
+  ]
+}

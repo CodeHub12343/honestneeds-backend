@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: honestneed-mongodb
+    ports:
+      - '27017:27017'
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: honestneed_dev123
+      MONGO_INITDB_DATABASE: honestneed-dev
+    volumes:
+      - mongodb-data:/data/db
+      - mongodb-config:/data/configdb
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: honestneed-api
+    ports:
+      - '5000:5000'
+    environment:
+      NODE_ENV: development
+      API_PORT: 5000
+      API_URL: http://localhost:5000
+      FRONTEND_URL: http://localhost:3000
+      MONGODB_URI: mongodb://admin:honestneed_dev123@mongodb:27017/honestneed-dev?authSource=admin
+      MONGODB_DB: honestneed-dev
+      JWT_SECRET: your-super-secret-jwt-key-for-development-min-32-chars
+      BCRYPT_ROUNDS: 10
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    volumes:
+      - ./src:/app/src
+      - ./logs:/app/logs
+    command: npm run dev
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:5000/health']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mongodb-data:
+  mongodb-config:
+
+networks:
+  default:
+    name: honestneed-network

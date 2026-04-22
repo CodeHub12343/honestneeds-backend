@@ -1,0 +1,956 @@
+openapi: 3.0.0
+info:
+  title: HonestNeed API
+  version: 1.0.0
+  description: |
+    HonestNeed Platform API - Complete specification for campaign management, user authentication, and transactions.
+    
+    ## Authentication
+    All protected endpoints require JWT token in Authorization header:
+    ```
+    Authorization: Bearer <jwt_token>
+    ```
+    
+    ## Error Handling
+    All API responses follow standard format:
+    ```json
+    {
+      "success": true|false,
+      "data": {} || null,
+      "error": {
+        "code": "ERROR_CODE",
+        "message": "Human readable message",
+        "details": {}
+      }
+    }
+    ```
+    
+    ## Development
+    - Base URL (dev): http://localhost:5000
+    - Base URL (staging): https://staging-api.honestneed.com
+    - Base URL (prod): https://api.honestneed.com
+  contact:
+    name: HonestNeed Support
+    email: support@honestneed.com
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:5000
+    description: Local development server
+  - url: https://staging-api.honestneed.com
+    description: Staging server
+  - url: https://api.honestneed.com
+    description: Production server
+
+paths:
+  /health:
+    get:
+      summary: Health check endpoint
+      tags:
+        - Health
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /api/v1/auth/register:
+    post:
+      summary: Register new user
+      tags:
+        - Authentication
+      operationId: registerUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          description: Invalid input or user already exists
+        '422':
+          description: Validation error
+
+  /api/v1/auth/login:
+    post:
+      summary: Login user
+      tags:
+        - Authentication
+      operationId: loginUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: Invalid credentials
+        '404':
+          description: User not found
+
+  /api/v1/auth/refresh:
+    post:
+      summary: Refresh JWT token
+      tags:
+        - Authentication
+      operationId: refreshToken
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: New token issued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '401':
+          description: Unauthorized
+
+  /api/v1/auth/logout:
+    post:
+      summary: Logout user
+      tags:
+        - Authentication
+      operationId: logoutUser
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Logout successful
+        '401':
+          description: Unauthorized
+
+  /api/v1/users/me:
+    get:
+      summary: Get current authenticated user
+      tags:
+        - Users
+      operationId: getCurrentUser
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Current user data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '401':
+          description: Unauthorized
+
+    put:
+      summary: Update current user profile
+      tags:
+        - Users
+      operationId: updateCurrentUser
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserRequest'
+      responses:
+        '200':
+          description: User updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '401':
+          description: Unauthorized
+        '422':
+          description: Validation error
+
+  /api/v1/users/{userId}:
+    get:
+      summary: Get user by ID
+      tags:
+        - Users
+      operationId: getUserById
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: User data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '404':
+          description: User not found
+
+    put:
+      summary: Update user (own profile or admin)
+      tags:
+        - Users
+      operationId: updateUser
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserRequest'
+      responses:
+        '200':
+          description: User updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: User not found
+
+  /api/v1/campaigns:
+    get:
+      summary: List public campaigns with filtering
+      tags:
+        - Campaigns
+      operationId: listCampaigns
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: type
+          in: query
+          description: Filter by campaign type (fundraising, sharing)
+          schema:
+            type: string
+            enum: [fundraising, sharing]
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, active, paused, completed]
+        - name: category
+          in: query
+          schema:
+            type: string
+        - name: radius
+          in: query
+          description: Search radius in miles from location
+          schema:
+            type: number
+        - name: latitude
+          in: query
+          schema:
+            type: number
+        - name: longitude
+          in: query
+          schema:
+            type: number
+      responses:
+        '200':
+          description: List of campaigns
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignListResponse'
+
+    post:
+      summary: Create new campaign
+      tags:
+        - Campaigns
+      operationId: createCampaign
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCampaignRequest'
+      responses:
+        '201':
+          description: Campaign created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignResponse'
+        '401':
+          description: Unauthorized
+        '422':
+          description: Validation error
+
+  /api/v1/campaigns/{campaignId}:
+    get:
+      summary: Get campaign details
+      tags:
+        - Campaigns
+      operationId: getCampaign
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Campaign data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignResponse'
+        '404':
+          description: Campaign not found
+
+    put:
+      summary: Update campaign
+      tags:
+        - Campaigns
+      operationId: updateCampaign
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCampaignRequest'
+      responses:
+        '200':
+          description: Campaign updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Campaign not found
+
+    delete:
+      summary: Delete campaign (draft only)
+      tags:
+        - Campaigns
+      operationId: deleteCampaign
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Campaign deleted
+        '401':
+          description: Unauthorized
+        '404':
+          description: Campaign not found
+
+  /api/v1/campaigns/{campaignId}/activate:
+    put:
+      summary: Activate campaign (draft to active)
+      tags:
+        - Campaigns
+      operationId: activateCampaign
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Campaign activated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignResponse'
+        '400':
+          description: Invalid status transition
+        '401':
+          description: Unauthorized
+
+  /api/v1/campaigns/{campaignId}/pause:
+    put:
+      summary: Pause active campaign
+      tags:
+        - Campaigns
+      operationId: pauseCampaign
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Campaign paused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignResponse'
+        '400':
+          description: Invalid status transition
+        '401':
+          description: Unauthorized
+
+  /api/v1/transactions:
+    get:
+      summary: List transactions (authenticated user)
+      tags:
+        - Transactions
+      operationId: listTransactions
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: List of transactions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionListResponse'
+        '401':
+          description: Unauthorized
+
+    post:
+      summary: Create transaction (donation, share reward, etc.)
+      tags:
+        - Transactions
+      operationId: createTransaction
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTransactionRequest'
+      responses:
+        '201':
+          description: Transaction created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionResponse'
+        '401':
+          description: Unauthorized
+        '422':
+          description: Validation error
+
+  /api/v1/transactions/{transactionId}:
+    get:
+      summary: Get transaction details
+      tags:
+        - Transactions
+      operationId: getTransaction
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: transactionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Transaction data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionResponse'
+        '401':
+          description: Unauthorized
+        '404':
+          description: Transaction not found
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: healthy
+        timestamp:
+          type: string
+          format: date-time
+        uptime:
+          type: number
+          description: Server uptime in seconds
+        environment:
+          type: string
+          example: development
+
+    RegisterRequest:
+      type: object
+      required:
+        - email
+        - password
+        - display_name
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+          description: Password with at least one uppercase, one number, one special char
+        display_name:
+          type: string
+          minLength: 2
+        phone:
+          type: string
+          pattern: ^\+?[\d\s\-()]+$
+        bio:
+          type: string
+          maxLength: 500
+
+    LoginRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+
+    AuthResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            user:
+              $ref: '#/components/schemas/User'
+            token:
+              type: string
+              description: JWT access token
+            refreshToken:
+              type: string
+              description: Refresh token for getting new access token
+
+    TokenResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            token:
+              type: string
+              description: New JWT access token
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+          format: email
+        display_name:
+          type: string
+        bio:
+          type: string
+        phone:
+          type: string
+        avatar_url:
+          type: string
+          format: url
+        role:
+          type: string
+          enum: [user, creator, admin]
+        verified:
+          type: boolean
+        location:
+          $ref: '#/components/schemas/Location'
+        created_at:
+          type: string
+          format: date-time
+
+    UserResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/User'
+
+    UpdateUserRequest:
+      type: object
+      properties:
+        display_name:
+          type: string
+        bio:
+          type: string
+          maxLength: 500
+        phone:
+          type: string
+        location:
+          $ref: '#/components/schemas/Location'
+
+    Location:
+      type: object
+      properties:
+        address:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+        latitude:
+          type: number
+          format: double
+        longitude:
+          type: number
+          format: double
+
+    Campaign:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        creator_id:
+          type: string
+        campaign_type:
+          type: string
+          enum: [fundraising, sharing]
+        status:
+          type: string
+          enum: [draft, active, paused, completed, rejected]
+        image_url:
+          type: string
+          format: url
+        location:
+          $ref: '#/components/schemas/Location'
+        start_date:
+          type: string
+          format: date-time
+        end_date:
+          type: string
+          format: date-time
+        visibility:
+          type: string
+          enum: [public, unlisted]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        fundraising:
+          type: object
+          properties:
+            goal_amount:
+              type: integer
+              description: Amount in cents
+            current_amount:
+              type: integer
+              description: Amount in cents
+            category:
+              type: string
+            tags:
+              type: array
+              items:
+                type: string
+        sharing:
+          type: object
+          properties:
+            platforms:
+              type: array
+              items:
+                type: string
+            reward_per_share:
+              type: integer
+              description: Amount in cents
+            budget:
+              type: integer
+              description: Amount in cents
+            max_shares:
+              type: integer
+            current_shares:
+              type: integer
+
+    CampaignResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/Campaign'
+
+    CampaignListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            campaigns:
+              type: array
+              items:
+                $ref: '#/components/schemas/Campaign'
+            pagination:
+              type: object
+              properties:
+                page:
+                  type: integer
+                limit:
+                  type: integer
+                total:
+                  type: integer
+                pages:
+                  type: integer
+
+    CreateCampaignRequest:
+      type: object
+      required:
+        - title
+        - description
+        - campaign_type
+      properties:
+        title:
+          type: string
+          minLength: 5
+        description:
+          type: string
+          minLength: 20
+          maxLength: 2000
+        campaign_type:
+          type: string
+          enum: [fundraising, sharing]
+        location:
+          $ref: '#/components/schemas/Location'
+        start_date:
+          type: string
+          format: date-time
+        end_date:
+          type: string
+          format: date-time
+        visibility:
+          type: string
+          enum: [public, unlisted]
+        fundraising:
+          type: object
+          properties:
+            goal_amount:
+              type: integer
+              minimum: 10000
+              description: Minimum $100 in cents
+            category:
+              type: string
+            tags:
+              type: array
+              items:
+                type: string
+              maxItems: 10
+        sharing:
+          type: object
+          properties:
+            platforms:
+              type: array
+              items:
+                type: string
+              minItems: 1
+              maxItems: 8
+            reward_per_share:
+              type: integer
+              minimum: 10
+              description: Minimum $0.10 in cents
+            budget:
+              type: integer
+              minimum: 1000
+              description: Minimum $10 in cents
+            max_shares:
+              type: integer
+              minimum: 1
+
+    UpdateCampaignRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 5
+        description:
+          type: string
+          minLength: 20
+          maxLength: 2000
+        image_url:
+          type: string
+          format: url
+
+    Transaction:
+      type: object
+      properties:
+        id:
+          type: string
+        campaign_id:
+          type: string
+        user_id:
+          type: string
+        amount:
+          type: integer
+          description: Amount in cents
+        transaction_type:
+          type: string
+          enum: [donation, share_reward, refund, platform_fee]
+        payment_method:
+          type: string
+          enum: [stripe, paypal, bank_transfer]
+        status:
+          type: string
+          enum: [pending, completed, failed, refunded]
+        payment_id:
+          type: string
+          description: External payment processor ID
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    TransactionResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/Transaction'
+
+    TransactionListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            transactions:
+              type: array
+              items:
+                $ref: '#/components/schemas/Transaction'
+            pagination:
+              type: object
+              properties:
+                page:
+                  type: integer
+                limit:
+                  type: integer
+                total:
+                  type: integer
+                pages:
+                  type: integer
+
+    CreateTransactionRequest:
+      type: object
+      required:
+        - campaign_id
+        - amount
+        - transaction_type
+      properties:
+        campaign_id:
+          type: string
+        amount:
+          type: integer
+          minimum: 1
+        transaction_type:
+          type: string
+          enum: [donation, share_reward, refund]
+        payment_method:
+          type: string
+          enum: [stripe, paypal]
+        payment_id:
+          type: string
+          description: External payment processor ID
+        status:
+          type: string
+          enum: [pending, completed, failed]
+
+tags:
+  - name: Health
+    description: Server health and status
+  - name: Authentication
+    description: User authentication and token management
+  - name: Users
+    description: User profile management
+  - name: Campaigns
+    description: Campaign creation and management
+  - name: Transactions
+    description: Financial transactions and donations
