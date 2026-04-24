@@ -143,9 +143,22 @@ const CampaignController = {
       // ✅ CLOUDINARY: Extract image URL from Cloudinary upload
       if (req.file?.image_url) {
         req.body.image_url = req.file.image_url;
+        req.body.image_public_id = req.file.image_public_id;
         winstonLogger.info('☁️ CampaignController: Cloudinary image URL attached', {
           image_url: req.file.image_url.substring(0, 100),
           image_public_id: req.file.image_public_id,
+        });
+      } else if (req.file === null || req.uploadError) {
+        // Cloudinary upload was attempted but failed
+        winstonLogger.error('❌ CampaignController: Cloudinary upload failed, cannot create campaign', {
+          uploadError: req.uploadError,
+          hasFile: !!req.file,
+        });
+        return res.status(400).json({
+          success: false,
+          message: 'Campaign image upload to Cloudinary failed',
+          error: req.uploadError || 'Image upload failed',
+          code: 'IMAGE_UPLOAD_FAILED',
         });
       }
 

@@ -234,6 +234,11 @@ const createUploadMiddleware = (options = {}) => {
             filename: file.filename,
             size: file.size,
             folder: config.folder,
+            cloudinaryConfig: {
+              hasCloudName: !!process.env.CLOUDINARY_CLOUD_NAME,
+              hasApiKey: !!process.env.CLOUDINARY_API_KEY,
+              hasApiSecret: !!process.env.CLOUDINARY_API_SECRET,
+            },
           });
 
           const cloudinaryResult = await uploadToCloudinary(file.data, file.filename, {
@@ -260,14 +265,24 @@ const createUploadMiddleware = (options = {}) => {
             folder: config.folder,
           });
         } catch (uploadError) {
-          winstonLogger.error('❌ Cloudinary upload failed', {
+          winstonLogger.error('❌ CRITICAL: Cloudinary upload failed - image will not be stored!', {
             error: uploadError.message,
             filename: file.filename,
             folder: config.folder,
+            stack: uploadError.stack,
+            cloudinaryEnvVars: {
+              hasCloudName: !!process.env.CLOUDINARY_CLOUD_NAME,
+              hasApiKey: !!process.env.CLOUDINARY_API_KEY,
+              hasApiSecret: !!process.env.CLOUDINARY_API_SECRET,
+            },
           });
-          // Don't fail the entire request - let controller decide how to handle missing image
-          req.file = null;
-          req.uploadError = uploadError.message;
+          // IMPORTANT: Fail the request - don't silently ignore Cloudinary errors
+          return res.status(500).json({
+            success: false,
+            error: 'Cloudinary image upload failed',
+            details: uploadError.message,
+            code: 'CLOUDINARY_ERROR',
+          });
         }
       }
 

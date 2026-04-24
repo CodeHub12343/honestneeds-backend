@@ -508,6 +508,10 @@ const campaignSchema = new mongoose.Schema(
       type: String,
       maxlength: 500,
     },
+    image_public_id: {
+      type: String,
+      maxlength: 300,
+    },
 
     // Tags and categories
     tags: [
