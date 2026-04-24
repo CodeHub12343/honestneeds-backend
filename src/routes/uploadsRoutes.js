@@ -37,6 +37,11 @@ router.get('/:filename', (req, res) => {
   try {
     const filename = req.params.filename;
     
+    // Set CORS headers immediately for all responses
+    res.set('Access-Control-Allow-Origin', '*');
+    res.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+    res.set('Cross-Origin-Resource-Policy', 'cross-origin');
+    
     // Security: Prevent directory traversal attacks
     if (filename.includes('..') || filename.includes('/')) {
       winstonLogger.warn('Upload security: Directory traversal attempt', {
@@ -93,11 +98,6 @@ router.get('/:filename', (req, res) => {
       ip: req.ip,
     });
 
-    // Ensure CORS headers are set properly for cross-origin image loading
-    // Allow any origin for static image files (no credentials needed)
-    res.set('Access-Control-Allow-Origin', '*');
-    res.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
-    res.set('Cross-Origin-Resource-Policy', 'cross-origin');
     res.set('X-Content-Type-Options', 'nosniff');
     
     // Send file with cache headers (1 week)
@@ -111,6 +111,8 @@ router.get('/:filename', (req, res) => {
       ip: req.ip,
     });
 
+    // Ensure CORS headers are set even for error responses
+    res.set('Access-Control-Allow-Origin', '*');
     res.status(500).json({
       success: false,
       error: 'Failed to serve file',
