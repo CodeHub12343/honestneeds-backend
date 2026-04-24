@@ -19,8 +19,9 @@ const UPLOADS_DIR = path.join(__dirname, '../../uploads');
  */
 router.options('/:filename', (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
-  res.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.set('Access-Control-Allow-Headers', 'Content-Type');
+  res.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type, Range');
+  res.set('Access-Control-Expose-Headers', 'Content-Length, Content-Type, Content-Range');
   res.set('Access-Control-Max-Age', '86400'); // 24 hours
   res.sendStatus(200);
 });
@@ -93,8 +94,11 @@ router.get('/:filename', (req, res) => {
     });
 
     // Ensure CORS headers are set properly for cross-origin image loading
-    res.set('Access-Control-Allow-Credentials', 'true');
+    // Allow any origin for static image files (no credentials needed)
+    res.set('Access-Control-Allow-Origin', '*');
+    res.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
     res.set('Cross-Origin-Resource-Policy', 'cross-origin');
+    res.set('X-Content-Type-Options', 'nosniff');
     
     // Send file with cache headers (1 week)
     res.set('Cache-Control', 'public, max-age=604800'); // 7 days
