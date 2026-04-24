@@ -152,8 +152,10 @@ const parseMultipartData = (buffer, boundary) => {
 
 /**
  * Parse multipart form data from request stream
+ * @param {object} req - Express request object
+ * @param {number} maxFileSize - Maximum file size in bytes
  */
-const parseMultipartFormData = (req) => {
+const parseMultipartFormData = (req, maxFileSize = 10 * 1024 * 1024) => {
   return new Promise((resolve, reject) => {
     const contentType = req.headers['content-type'] || '';
 
@@ -173,9 +175,9 @@ const parseMultipartFormData = (req) => {
       data = Buffer.concat([data, chunk]);
 
       // Safety check: prevent memory exhaustion
-      if (data.length > UPLOAD_CONFIG.MAX_FILE_SIZE) {
+      if (data.length > maxFileSize) {
         req.pause();
-        reject(new Error(`File size exceeds ${UPLOAD_CONFIG.MAX_FILE_SIZE / 1024 / 1024}MB limit`));
+        reject(new Error(`File size exceeds ${maxFileSize / 1024 / 1024}MB limit`));
       }
     });
 
@@ -195,89 +197,101 @@ const parseMultipartFormData = (req) => {
 };
 
 /**
- * Express middleware for handling multipart form-data uploads
- * 
- * Uploads images to Cloudinary instead of local disk
- * 
- * Typical usage in routes:
- *   router.post('/', uploadMiddleware, controller.create);
- * 
- * In controller:
- *   const { image_url, image_public_id } = req.file || {};
- *   // Use image_url directly in database
+ * Factory function that creates upload middleware with custom configuration
+ * @param {object} options - Configuration options
+ * @param {string} options.folder - Cloudinary folder (default: 'honestneed/campaigns')
+ * @param {number} options.maxFileSize - Max file size in bytes (default: 10MB)
+ * @returns {Function} Express middleware function
  */
-const uploadMiddleware = async (req, res, next) => {
-  try {
-    const { fields, file } = await parseMultipartFormData(req);
+const createUploadMiddleware = (options = {}) => {
+  const config = {
+    folder: options.folder || 'honestneed/campaigns',
+    maxFileSize: options.maxFileSize || (10 * 1024 * 1024),
+  };
 
-    winstonLogger.info('📥 uploadMiddleware: Multipart data parsed', {
-      fieldCount: Object.keys(fields).length,
-      hasImageFile: !!file,
-      imageFileName: file?.filename,
-      imageSize: file?.size,
-    });
+  return async (req, res, next) => {
+    try {
+      const { fields, file } = await parseMultipartFormData(req, config.maxFileSize);
 
-    // Attach parsed fields to request body
-    req.body = {
-      ...req.body,
-      ...fields,
-    };
+      winstonLogger.info('📥 uploadMiddleware: Multipart data parsed', {
+        fieldCount: Object.keys(fields).length,
+        hasImageFile: !!file,
+        imageFileName: file?.filename,
+        imageSize: file?.size,
+        folder: config.folder,
+      });
 
-    // If image file exists, upload to Cloudinary
-    if (file) {
-      try {
-        winstonLogger.info('☁️ Uploading to Cloudinary...', {
-          filename: file.filename,
-          size: file.size,
-        });
+      // Attach parsed fields to request body
+      req.body = {
+        ...req.body,
+        ...fields,
+      };
 
-        const cloudinaryResult = await uploadToCloudinary(file.data, file.filename, {
-          folder: 'honestneed/campaigns',
-        });
+      // If image file exists, upload to Cloudinary
+      if (file) {
+        try {
+          winstonLogger.info('☁️ Uploading to Cloudinary...', {
+            filename: file.filename,
+            size: file.size,
+            folder: config.folder,
+          });
 
-        // Attach Cloudinary info to request
-        req.file = {
-          fieldname: file.fieldname,
-          filename: file.filename,
-          mimetype: file.mimetype,
-          size: file.size,
-          // Cloudinary response
-          image_url: cloudinaryResult.secure_url,
-          image_public_id: cloudinaryResult.publicId,
-          image_width: cloudinaryResult.width,
-          image_height: cloudinaryResult.height,
-          image_format: cloudinaryResult.format,
-        };
+          const cloudinaryResult = await uploadToCloudinary(file.data, file.filename, {
+            folder: config.folder,
+          });
 
-        winstonLogger.info('✅ Cloudinary upload successful', {
-          publicId: cloudinaryResult.publicId,
-          url: cloudinaryResult.secure_url.substring(0, 100),
-        });
-      } catch (uploadError) {
-        winstonLogger.error('❌ Cloudinary upload failed', {
-          error: uploadError.message,
-          filename: file.filename,
-        });
-        // Don't fail the entire request - let controller decide how to handle missing image
-        req.file = null;
-        req.uploadError = uploadError.message;
+          // Attach Cloudinary info to request
+          req.file = {
+            fieldname: file.fieldname,
+            filename: file.filename,
+            mimetype: file.mimetype,
+            size: file.size,
+            // Cloudinary response
+            image_url: cloudinaryResult.secure_url,
+            image_public_id: cloudinaryResult.publicId,
+            image_width: cloudinaryResult.width,
+            image_height: cloudinaryResult.height,
+            image_format: cloudinaryResult.format,
+          };
+
+          winstonLogger.info('✅ Cloudinary upload successful', {
+            publicId: cloudinaryResult.publicId,
+            url: cloudinaryResult.secure_url.substring(0, 100),
+            folder: config.folder,
+          });
+        } catch (uploadError) {
+          winstonLogger.error('❌ Cloudinary upload failed', {
+            error: uploadError.message,
+            filename: file.filename,
+            folder: config.folder,
+          });
+          // Don't fail the entire request - let controller decide how to handle missing image
+          req.file = null;
+          req.uploadError = uploadError.message;
+        }
       }
+
+      next();
+    } catch (error) {
+      winstonLogger.error('❌ uploadMiddleware error', {
+        error: error.message,
+        stack: error.stack,
+      });
+
+      return res.status(400).json({
+        success: false,
+        error: 'File upload failed',
+        details: error.message,
+        code: 'UPLOAD_FAILED',
+      });
     }
-
-    next();
-  } catch (error) {
-    winstonLogger.error('❌ uploadMiddleware error', {
-      error: error.message,
-      stack: error.stack,
-    });
-
-    return res.status(400).json({
-      success: false,
-      error: 'File upload failed',
-      details: error.message,
-      code: 'UPLOAD_FAILED',
-    });
-  }
+  };
 };
 
+/**
+ * Default upload middleware for campaigns (backward compatibility)
+ */
+const uploadMiddleware = createUploadMiddleware({ folder: 'honestneed/campaigns' });
+
 module.exports = uploadMiddleware;
+module.exports.createUploadMiddleware = createUploadMiddleware;

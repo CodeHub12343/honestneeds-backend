@@ -313,13 +313,18 @@ exports.uploadProfilePicture = async (req, res, next) => {
       return next(error);
     }
 
+    // ✅ CLOUDINARY: New format includes image_url instead of path
+    // Validate that Cloudinary upload succeeded
+    if (!uploadedFile.image_url) {
+      const error = new Error('File upload to Cloudinary failed');
+      error.statusCode = 500;
+      error.code = 'CLOUDINARY_UPLOAD_FAILED';
+      return next(error);
+    }
+
     // Validate file type
     const allowedMimes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
     if (!allowedMimes.includes(uploadedFile.mimetype)) {
-      // Clean up uploaded file
-      if (uploadedFile.path && fs.existsSync(uploadedFile.path)) {
-        fs.unlinkSync(uploadedFile.path);
-      }
       const error = new Error('Invalid file type. Allowed: JPEG, PNG, GIF, WebP');
       error.statusCode = 400;
       error.code = 'INVALID_FILE_TYPE';
@@ -329,9 +334,6 @@ exports.uploadProfilePicture = async (req, res, next) => {
     // Validate file size (5MB max for avatars)
     const maxSize = 5 * 1024 * 1024; // 5MB
     if (uploadedFile.size > maxSize) {
-      if (uploadedFile.path && fs.existsSync(uploadedFile.path)) {
-        fs.unlinkSync(uploadedFile.path);
-      }
       const error = new Error('File size exceeds 5MB limit');
       error.statusCode = 400;
       error.code = 'FILE_TOO_LARGE';
@@ -342,33 +344,34 @@ exports.uploadProfilePicture = async (req, res, next) => {
     const user = await User.findById(id);
 
     if (!user || user.deleted_at) {
-      if (uploadedFile.path && fs.existsSync(uploadedFile.path)) {
-        fs.unlinkSync(uploadedFile.path);
-      }
       const error = new Error('User not found');
       error.statusCode = 404;
       error.code = 'USER_NOT_FOUND';
       return next(error);
     }
 
-    // Delete old avatar if it exists
-    if (user.avatar_url) {
-      const oldPath = path.join(__dirname, '../../', user.avatar_url);
-      if (fs.existsSync(oldPath)) {
-        try {
-          fs.unlinkSync(oldPath);
-        } catch (err) {
-          winstonLogger.warn('Could not delete old avatar file', {
-            filePath: oldPath,
-            error: err.message,
-          });
-        }
+    // ✅ CLOUDINARY: Delete old avatar if it exists
+    // Old avatars stored as URLs or local paths; new ones are Cloudinary URLs
+    if (user.avatar_url && user.avatar_public_id) {
+      try {
+        const { deleteFromCloudinary } = require('../utils/cloudinaryUpload');
+        await deleteFromCloudinary(user.avatar_public_id);
+        winstonLogger.info('Old Cloudinary avatar deleted', {
+          userId: id,
+          publicId: user.avatar_public_id,
+        });
+      } catch (err) {
+        winstonLogger.warn('Could not delete old Cloudinary avatar', {
+          userId: id,
+          publicId: user.avatar_public_id,
+          error: err.message,
+        });
       }
     }
 
-    // Set new avatar URL (relative path from project root)
-    const relativeFilePath = `uploads/avatars/${uploadedFile.filename}`;
-    user.avatar_url = relativeFilePath;
+    // ✅ CLOUDINARY: Set new avatar URL (from Cloudinary)
+    user.avatar_url = uploadedFile.image_url;
+    user.avatar_public_id = uploadedFile.image_public_id; // Store for future deletion
     user.updated_at = new Date();
 
     // Save updated user
@@ -377,34 +380,23 @@ exports.uploadProfilePicture = async (req, res, next) => {
     winstonLogger.info('User avatar updated', {
       userId: currentUser.id,
       targetUserId: id,
-      fileName: uploadedFile.filename,
-      fileSize: uploadedFile.size,
+      avatarUrl: uploadedFile.image_url.substring(0, 100),
+      publicId: uploadedFile.image_public_id,
     });
 
+    // Return success response
     res.status(200).json({
       success: true,
       message: 'Profile picture uploaded successfully',
-      data: {
-        avatarUrl: updatedUser.avatar_url,
-        user: updatedUser.toJSON(),
+      user: {
+        id: updatedUser._id,
+        avatar_url: updatedUser.avatar_url,
       },
     });
   } catch (error) {
-    // Try to clean up uploaded file on error
-    if (req.file && req.file.path && fs.existsSync(req.file.path)) {
-      try {
-        fs.unlinkSync(req.file.path);
-      } catch (unlinkErr) {
-        winstonLogger.warn('Could not clean up uploaded file after error', {
-          filePath: req.file.path,
-          error: unlinkErr.message,
-        });
-      }
-    }
-
-    winstonLogger.error('Error uploading profile picture', {
-      userId: req.params.id,
+    winstonLogger.error('Profile picture upload error', {
       error: error.message,
+      userId: req.params?.id,
       stack: error.stack,
     });
     next(error);

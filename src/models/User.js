@@ -37,6 +37,10 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    avatar_public_id: {
+      type: String,
+      default: null,
+    },
     bio: {
       type: String,
       maxlength: 2000,

@@ -15,9 +15,15 @@
 const express = require('express');
 const userController = require('../controllers/userController');
 const { authMiddleware } = require('../middleware/authMiddleware');
-const { uploadMiddleware } = require('../middleware/uploadMiddleware');
+const { createUploadMiddleware } = require('../middleware/uploadMiddleware');
 
 const router = express.Router();
+
+// Avatar upload middleware (5MB max, avatars folder)
+const avatarUploadMiddleware = createUploadMiddleware({
+  folder: 'honestneed/avatars',
+  maxFileSize: 5 * 1024 * 1024, // 5MB
+});
 
 /**
  * GET /users/:id
@@ -39,7 +45,7 @@ router.patch('/:id', authMiddleware, userController.updateUserProfile);
  * Protected - multipart/form-data with 'avatar' field
  * Accepts: JPEG, PNG, GIF, WebP (max 5MB)
  */
-router.post('/:id/avatar', authMiddleware, uploadMiddleware.single('avatar'), userController.uploadProfilePicture);
+router.post('/:id/avatar', authMiddleware, avatarUploadMiddleware, userController.uploadProfilePicture);
 
 /**
  * GET /users/:id/settings
