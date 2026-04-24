@@ -13,7 +13,7 @@ const DonationController = require('../controllers/DonationController');
 const ShareController = require('../controllers/ShareController');
 const VolunteerOfferController = require('../controllers/VolunteerOfferController');
 const campaignUpdateRoutes = require('./campaignUpdateRoutes');
-const { uploadMiddleware } = require('../middleware/uploadMiddleware');
+const uploadMiddleware = require('../middleware/uploadMiddleware');
 const { authMiddleware } = require('../middleware/authMiddleware');
 const {
   validateRecordShare,

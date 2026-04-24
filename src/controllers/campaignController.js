@@ -140,9 +140,19 @@ const CampaignController = {
         });
       }
 
+      // ✅ CLOUDINARY: Extract image URL from Cloudinary upload
+      if (req.file?.image_url) {
+        req.body.image_url = req.file.image_url;
+        winstonLogger.info('☁️ CampaignController: Cloudinary image URL attached', {
+          image_url: req.file.image_url.substring(0, 100),
+          image_public_id: req.file.image_public_id,
+        });
+      }
+
       // ✅ LOG ALL FIELDS IN REQ.BODY BEFORE SERVICE CALL
       winstonLogger.info('📋 CampaignController: req.body fields about to send to service', {
         allBodyKeys: Object.keys(req.body),
+        hasImageUrl: 'image_url' in req.body,
         bodyFieldsCheckList: {
           has_title: 'title' in req.body,
           has_prayer_config: 'prayer_config' in req.body,
