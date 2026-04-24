@@ -83,17 +83,20 @@ const corsOptions = {
   // In development, be permissive with origins; in production, use specific domain
   origin: function(origin, callback) {
     if (process.env.NODE_ENV === 'production') {
-      // Get frontend URL from environment, with fallback for Vercel
-      const frontendUrl = process.env.FRONTEND_URL || 'https://honestneeds.vercel.app';
+      // Get frontend URL from environment, with fallback to Render
+      const frontendUrl = process.env.FRONTEND_URL || 'https://honestneeds.onrender.com';
       const allowedOrigins = [
         frontendUrl,
-        'https://honestneeds.vercel.app', // Vercel production
-        'https://honestneeds-*.vercel.app', // Preview deployments
+        'https://honestneeds.onrender.com', // Render production
+        'https://honestneeds-*.onrender.com', // Render preview deployments
+        'https://honestneeds.vercel.app', // Legacy Vercel production
+        'https://honestneeds-*.vercel.app', // Legacy Vercel preview deployments
       ];
       
       // Check if origin matches allowed list (exact match or wildcard pattern)
       const isAllowed = !origin || 
                         allowedOrigins.includes(origin) ||
+                        /^https:\/\/honestneeds-.*\.onrender\.com$/.test(origin) ||
                         /^https:\/\/honestneeds-.*\.vercel\.app$/.test(origin);
       
       if (isAllowed) {
