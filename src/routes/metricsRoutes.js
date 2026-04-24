@@ -133,19 +133,39 @@ router.get('/creator/dashboard', authMiddleware, async (req, res) => {
     const Transaction = require('../models/Transaction');
     const { ShareRecord } = require('../models/Share');
 
+    // ✅ FIX: Only count COMPLETED/VERIFIED donations (not pending, failed, refunded)
     const donations = await Transaction.find({
       creator_id: userId,
+      status: { $in: ['completed', 'verified', 'approved'] },
+      transaction_type: 'donation',
       created_at: { $gte: start, $lte: end }
     });
 
+    // ✅ FIX: Only count paid share rewards
     const shares = await ShareRecord.find({
       creator_id: userId,
+      is_paid: true,
       created_at: { $gte: start, $lte: end }
     });
 
     const totalDonations = donations.reduce((sum, d) => sum + (d.amount_cents || 0), 0) / 100;
     const totalShares = shares.length;
     const totalEngagement = donations.length + shares.length;
+
+    // ✅ FIX: Calculate daily average and peak day from actual data
+    const dailyTotals = {};
+    donations.forEach(d => {
+      const date = new Date(d.created_at).toISOString().split('T')[0];
+      dailyTotals[date] = (dailyTotals[date] || 0) + (d.amount_cents || 0) / 100;
+    });
+    
+    const dailyValues = Object.values(dailyTotals);
+    const dailyAverage = dailyValues.length > 0 
+      ? totalDonations / dailyValues.length 
+      : 0;
+    const peakDay = dailyValues.length > 0 
+      ? Math.max(...dailyValues) 
+      : 0;
 
     res.json({
       success: true,
@@ -181,6 +201,10 @@ router.get('/creator/dashboard', authMiddleware, async (req, res) => {
         totalDonations: Math.round(totalDonations * 100) / 100,
         totalShares,
         totalEngagement,
+        // ✅ FIX: Add calculated metrics
+        dailyAverage: Math.round(dailyAverage * 100) / 100,
+        peakDay: Math.round(peakDay * 100) / 100,
+        donorCount: donations.length,
       }
     });
   } catch (error) {

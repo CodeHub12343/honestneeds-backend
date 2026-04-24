@@ -86,7 +86,7 @@ const TimeSeriesAnalyticsService = {
           $match: {
             campaign_id: campaignId,
             transaction_type: 'donation',
-            status: { $in: ['completed', 'verified'] },
+            status: { $in: ['completed', 'verified', 'approved'] },
             created_at: { $gte: startDate },
           },
         },
@@ -95,10 +95,10 @@ const TimeSeriesAnalyticsService = {
           $group: {
             _id: '$datePeriod',
             count: { $sum: 1 },
-            totalAmount: { $sum: '$amount' },
-            avgAmount: { $avg: '$amount' },
-            maxAmount: { $max: '$amount' },
-            minAmount: { $min: '$amount' },
+            totalAmount: { $sum: '$amount_cents' },
+            avgAmount: { $avg: '$amount_cents' },
+            maxAmount: { $max: '$amount_cents' },
+            minAmount: { $min: '$amount_cents' },
           },
         },
         { $sort: { _id: 1 } },
