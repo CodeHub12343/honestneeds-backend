@@ -83,11 +83,12 @@ const corsOptions = {
   // In development, be permissive with origins; in production, use specific domain
   origin: function(origin, callback) {
     if (process.env.NODE_ENV === 'production') {
-      // Get frontend URL from environment, with fallback to Render
-      const frontendUrl = process.env.FRONTEND_URL || 'https://honestneeds.onrender.com';
+      // Get frontend URL from environment, with fallback to production domain
+      const frontendUrl = process.env.FRONTEND_URL || 'https://honestneed.com';
       const allowedOrigins = [
         frontendUrl,
-        'https://honestneeds.onrender.com', // Render production
+        'https://honestneed.com', // Production domain
+        'https://honestneeds.onrender.com', // Legacy Render production (backward compatibility)
         'https://honestneeds-*.onrender.com', // Render preview deployments
         'https://honestneeds.vercel.app', // Legacy Vercel production
         'https://honestneeds-*.vercel.app', // Legacy Vercel preview deployments
