@@ -78,6 +78,13 @@ class StripeWebhookHandler {
 
       // Extract metadata
       const metadata = session.metadata || {};
+
+      // Route if it's a sponsorship payment
+      if (metadata.type === 'sponsorship') {
+        await this.handleSponsorshipCheckoutCompleted(session);
+        return;
+      }
+
       const { campaign_id, creator_id, tier } = metadata;
 
       if (!campaign_id || !creator_id) {
@@ -268,6 +275,61 @@ class StripeWebhookHandler {
       winstonLogger.error('Error handling subscription.deleted webhook', {
         error: error.message,
         subscriptionId: subscription.id,
+      });
+    }
+  }
+
+  /**
+   * Handle successful sponsorship checkout session
+   */
+  async handleSponsorshipCheckoutCompleted(session) {
+    try {
+      const { sponsorshipId } = session.metadata || {};
+      if (!sponsorshipId) {
+        winstonLogger.warn('Missing sponsorshipId in sponsorship checkout metadata', {
+          sessionId: session.id,
+        });
+        return;
+      }
+
+      const Sponsorship = require('../models/Sponsorship');
+      const sponsorship = await Sponsorship.findById(sponsorshipId);
+
+      if (!sponsorship) {
+        winstonLogger.error('Sponsorship not found for webhook session', {
+          sponsorshipId,
+          sessionId: session.id,
+        });
+        return;
+      }
+
+      // Check if already processed
+      if (sponsorship.status !== 'pending_payment') {
+        winstonLogger.info('Sponsorship webhook already processed or invalid status', {
+          sponsorshipId,
+          status: sponsorship.status,
+        });
+        return;
+      }
+
+      // Update status and verify payment
+      sponsorship.status = 'pending_onboarding';
+      sponsorship.paymentVerifiedByAdmin = true;
+      sponsorship.stripeSessionId = session.id;
+      sponsorship.stripePaymentIntentId = session.payment_intent;
+
+      await sponsorship.save();
+
+      winstonLogger.info('✅ Sponsorship payment succeeded and verified via webhook', {
+        sponsorshipId,
+        stripeSessionId: session.id,
+        paymentIntentId: session.payment_intent,
+      });
+    } catch (error) {
+      winstonLogger.error('Error handling sponsorship checkout completion', {
+        error: error.message,
+        stack: error.stack,
+        sessionId: session.id,
       });
     }
   }

@@ -84,10 +84,11 @@ const corsOptions = {
   origin: function(origin, callback) {
     if (process.env.NODE_ENV === 'production') {
       // Get frontend URL from environment, with fallback to production domain
-      const frontendUrl = process.env.FRONTEND_URL || 'https://honestneed.com';
+      const frontendUrl = process.env.FRONTEND_URL || 'https://www.honestneed.com';
       const allowedOrigins = [
         frontendUrl,
-        'https://honestneed.com', // Production domain
+        'https://honestneed.com', // Production domain (without www)
+        'https://www.honestneed.com', // Production domain (with www) - CRITICAL for CORS
         'https://honestneeds.onrender.com', // Legacy Render production (backward compatibility)
         'https://honestneeds-*.onrender.com', // Render preview deployments
         'https://honestneeds.vercel.app', // Legacy Vercel production
@@ -101,9 +102,10 @@ const corsOptions = {
                         /^https:\/\/honestneeds-.*\.vercel\.app$/.test(origin);
       
       if (isAllowed) {
+        logger.debug(`✅ CORS allowed origin: ${origin}`);
         callback(null, true);
       } else {
-        console.warn(`⚠️ CORS rejected origin: ${origin}`);
+        logger.warn(`⚠️ CORS rejected origin: ${origin}`);
         callback(new Error('Not allowed by CORS'));
       }
     } else {
@@ -266,6 +268,9 @@ app.use('/api/uploads', require('./routes/uploadsRoutes'));
 
 // ✅ NEW: Campaign Boost Routes (visibility enhancement with Stripe integration)
 app.use('/api/boosts', require('./routes/boostRoutes'));
+
+// ✅ NEW: Sponsorship Routes (tier selection, checkout, onboarding, admin management)
+app.use('/api/sponsorships', require('./routes/sponsorshipRoutes'));
 
 // ✅ NOTE: Stripe Webhook Routes already registered at the top, before body parsers
 
