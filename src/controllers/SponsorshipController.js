@@ -398,7 +398,7 @@ class SponsorshipController {
     try {
       const { id } = req.params;
 
-      const sponsorship = await Sponsorship.findById(id).lean();
+      const sponsorship = await Sponsorship.findById(id);
       if (!sponsorship) {
         return res.status(404).json({
           success: false,
@@ -407,9 +407,35 @@ class SponsorshipController {
         });
       }
 
+      // ── Fallback check to Stripe in case webhook fails or is delayed ──
+      if (sponsorship.status === 'pending_payment' && sponsorship.stripeSessionId) {
+        try {
+          const session = await stripe.checkout.sessions.retrieve(sponsorship.stripeSessionId);
+          if (session && session.payment_status === 'paid') {
+            sponsorship.status = 'pending_onboarding';
+            sponsorship.paymentVerifiedByAdmin = true;
+            if (session.payment_intent) {
+              sponsorship.stripePaymentIntentId = typeof session.payment_intent === 'string'
+                ? session.payment_intent
+                : session.payment_intent.id;
+            }
+            await sponsorship.save();
+            logger.info('✅ Sponsorship payment auto-verified via API fallback check', {
+              sponsorshipId: sponsorship._id,
+              stripeSessionId: sponsorship.stripeSessionId,
+            });
+          }
+        } catch (stripeError) {
+          logger.error('Failed to retrieve Stripe session in API fallback check', {
+            sponsorshipId: sponsorship._id,
+            error: stripeError.message,
+          });
+        }
+      }
+
       return res.status(200).json({
         success: true,
-        data: sponsorship,
+        data: sponsorship.toObject ? sponsorship.toObject() : sponsorship,
       });
     } catch (error) {
       logger.error('❌ SponsorshipController.getSponsorshipById error', {
