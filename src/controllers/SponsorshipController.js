@@ -392,7 +392,7 @@ class SponsorshipController {
   }
 
   // ──────────────────────────────────────────────────────────────
-  // GET /api/sponsorships/:id   (auth required)
+  // GET /api/sponsorships/:id   (no auth required - public via high-entropy ID)
   // ──────────────────────────────────────────────────────────────
   static async getSponsorshipById(req, res) {
     try {

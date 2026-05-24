@@ -6,9 +6,7 @@
  *   POST   /create         — Create a sponsorship
  *   PATCH  /:id/onboard    — Complete onboarding
  *   GET    /public          — Public sponsor list
- *
- * Auth-required endpoints:
- *   GET    /:id             — Single sponsorship detail
+ *   GET    /:id            — Single sponsorship detail (public via high-entropy ID)
  *
  * Admin-only endpoints:
  *   GET    /admin           — All sponsorships + stats
@@ -74,7 +72,7 @@ router.patch('/:id/complete-task', authenticate, authorize(['admin']), Sponsorsh
 router.patch('/:id/suspend', authenticate, authorize(['admin']), SponsorshipController.suspendSponsorship);
 
 // ═══════════════════════════════════════════════════════════════
-// AUTH-REQUIRED ENDPOINT (must come after named routes)
+// PUBLIC SINGLE DETAIL ENDPOINT (must come after named routes)
 // ═══════════════════════════════════════════════════════════════
 
 /**
