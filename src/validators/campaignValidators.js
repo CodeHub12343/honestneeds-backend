@@ -47,13 +47,28 @@ const locationSchema = z.object({
 });
 
 // Goals schema
+// SF-3: a fundraising goal is a real dollar target (stored in cents). Block
+// placeholder/stray $1–$4 goals that produced the "$0 of $1" / "10000% funded"
+// dashboard nonsense. sharing_reach is a share COUNT, so it keeps no dollar floor.
+const MIN_FUNDRAISING_GOAL_CENTS = 500; // $5.00
+
 const goalsSchema = z.array(
-  z.object({
-    goal_type: z.enum(['fundraising', 'sharing_reach', 'resource_collection']),
-    goal_name: z.string().max(100).optional(),
-    target_amount: z.number().positive(),
-    current_amount: z.number().default(0),
-  })
+  z
+    .object({
+      goal_type: z.enum(['fundraising', 'sharing_reach', 'resource_collection']),
+      goal_name: z.string().max(100).optional(),
+      target_amount: z.number().positive(),
+      current_amount: z.number().default(0),
+    })
+    .superRefine((goal, ctx) => {
+      if (goal.goal_type === 'fundraising' && goal.target_amount < MIN_FUNDRAISING_GOAL_CENTS) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['target_amount'],
+          message: `Fundraising goal must be at least $${(MIN_FUNDRAISING_GOAL_CENTS / 100).toFixed(2)}`,
+        });
+      }
+    })
 );
 
 // ✅ Prayer Config Schema - Accept either object or JSON string
@@ -173,6 +188,9 @@ const campaignCreationSchema = z.object({
 
   location: locationSchema.optional(),
 
+  // CA-14: Geographic scope (local / national / global)
+  geographic_scope: z.enum(['local', 'national', 'global']).optional().default('national'),
+
   payment_methods: z
     .array(paymentMethodSchema)
     .min(1, 'At least one payment method is required')
@@ -223,6 +241,12 @@ const campaignCreationSchema = z.object({
     .positive()
     .optional(),
 
+  // Phase A (trust-based Share-to-Earn): creator's agreement to pay sharers
+  // directly. Already coerced to a boolean before validation; must be declared
+  // here or Zod strips it and the service falsely rejects with
+  // PAYOUT_CONSENT_REQUIRED.
+  payout_consent: z.boolean().optional(),
+
   // ✅ Prayer config field - optional, can be object or JSON string
   prayer_config: prayerConfigSchema,
 });
@@ -250,6 +274,9 @@ const campaignUpdateSchema = z.object({
   goals: goalsSchema.optional(),
 
   location: locationSchema.optional(),
+
+  // CA-14: Geographic scope (local / national / global)
+  geographic_scope: z.enum(['local', 'national', 'global']).optional(),
 
   payment_methods: z
     .array(paymentMethodSchema)

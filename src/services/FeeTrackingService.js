@@ -8,23 +8,194 @@ const Transaction = require('../models/Transaction');
  */
 class FeeTrackingService {
   /**
-   * Record a fee from a donation
+   * Record a platform fee owed for a (confirmed) donation.
+   * Idempotent: a FeeTransaction is uniquely keyed by transaction_id, so a
+   * repeated call (e.g. re-confirmation) returns the existing record instead of
+   * throwing a duplicate-key error.
+   *
+   * @param {Object} feeData
+   * @param {ObjectId} feeData.transaction_id - the donation Transaction _id
+   * @param {ObjectId} feeData.campaign_id
+   * @param {ObjectId} [feeData.creator_id] - creator who owes the fee
+   * @param {number} feeData.gross_cents
+   * @param {number} feeData.fee_cents
+   * @param {string} [feeData.status='verified'] - 'pending'|'verified'|...
    */
   static async recordFee(feeData) {
     try {
+      // Idempotency guard — never create two fee rows for one donation.
+      const existing = await FeeTransaction.findOne({ transaction_id: feeData.transaction_id });
+      if (existing) {
+        return { success: true, data: existing, idempotent: true };
+      }
+
       const feeTransaction = new FeeTransaction({
         transaction_id: feeData.transaction_id,
         campaign_id: feeData.campaign_id,
+        creator_id: feeData.creator_id || null,
         gross_amount_cents: feeData.gross_cents,
         platform_fee_cents: feeData.fee_cents,
-        status: feeData.status || 'pending',
+        // A fee for a CONFIRMED donation is genuinely owed → default 'verified'.
+        status: feeData.status || 'verified',
         created_at: new Date()
       });
 
       await feeTransaction.save();
       return { success: true, data: feeTransaction };
     } catch (error) {
+      // Tolerate a race that created the row concurrently.
+      if (error.code === 11000) {
+        const existing = await FeeTransaction.findOne({ transaction_id: feeData.transaction_id });
+        if (existing) return { success: true, data: existing, idempotent: true };
+      }
       console.error('Record fee error:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Reverse a fee when its donation is rejected / charged back.
+   * Marks the fee 'refunded' so it drops out of "owed" and never gets settled.
+   * No-op (still success) if no fee was recorded for the transaction.
+   *
+   * @param {ObjectId} transactionId - the donation Transaction _id
+   * @param {string} [reason]
+   * @param {ObjectId} [performedBy]
+   */
+  static async reverseFee(transactionId, reason = 'Donation rejected', performedBy = null) {
+    try {
+      const fee = await FeeTransaction.findOne({ transaction_id: transactionId });
+      if (!fee) {
+        return { success: true, reversed: false, reason: 'No fee recorded for transaction' };
+      }
+      if (fee.status === 'refunded') {
+        return { success: true, reversed: false, reason: 'Fee already reversed' };
+      }
+      if (fee.status === 'settled') {
+        // Already settled to the platform — flag rather than silently reverse.
+        fee.addNote('reversal_after_settlement', reason, performedBy);
+        await fee.save();
+        return {
+          success: true,
+          reversed: false,
+          reason: 'Fee already settled; flagged for manual adjustment',
+        };
+      }
+
+      fee.status = 'refunded';
+      fee.refund_reason = reason;
+      fee.refunded_at = new Date();
+      fee.refunded_by = performedBy;
+      fee.addNote('refunded', reason, performedBy);
+      await fee.save();
+
+      return { success: true, reversed: true, data: { fee_cents: fee.platform_fee_cents } };
+    } catch (error) {
+      console.error('Reverse fee error:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Creator fee statement (CF-3): what this creator owes the platform.
+   * "Owed" = fees on confirmed donations that have not yet been settled.
+   *
+   * @param {ObjectId} creatorId
+   * @returns {Promise<Object>} { success, data: { owed, settled, refunded, byCampaign } }
+   */
+  static async getCreatorFeeStatement(creatorId) {
+    try {
+      const cid = creatorId instanceof mongoose.Types.ObjectId
+        ? creatorId
+        : new mongoose.Types.ObjectId(creatorId);
+
+      const [agg] = await FeeTransaction.aggregate([
+        { $match: { creator_id: cid } },
+        {
+          $facet: {
+            owed: [
+              { $match: { status: { $in: ['pending', 'verified'] }, settled_at: null } },
+              {
+                $group: {
+                  _id: null,
+                  count: { $sum: 1 },
+                  fees: { $sum: '$platform_fee_cents' },
+                  gross: { $sum: '$gross_amount_cents' },
+                },
+              },
+            ],
+            settled: [
+              { $match: { status: 'settled' } },
+              { $group: { _id: null, count: { $sum: 1 }, fees: { $sum: '$platform_fee_cents' } } },
+            ],
+            refunded: [
+              { $match: { status: 'refunded' } },
+              { $group: { _id: null, count: { $sum: 1 }, fees: { $sum: '$platform_fee_cents' } } },
+            ],
+            byCampaign: [
+              { $match: { status: { $in: ['pending', 'verified'] }, settled_at: null } },
+              {
+                $group: {
+                  _id: '$campaign_id',
+                  fees: { $sum: '$platform_fee_cents' },
+                  gross: { $sum: '$gross_amount_cents' },
+                  count: { $sum: 1 },
+                },
+              },
+              { $lookup: { from: 'campaigns', localField: '_id', foreignField: '_id', as: 'campaign' } },
+              {
+                $project: {
+                  fees: 1,
+                  gross: 1,
+                  count: 1,
+                  title: { $arrayElemAt: ['$campaign.title', 0] },
+                  campaign_ref: { $arrayElemAt: ['$campaign.campaign_id', 0] },
+                },
+              },
+              { $sort: { fees: -1 } },
+            ],
+          },
+        },
+      ]);
+
+      const owed = (agg && agg.owed[0]) || { count: 0, fees: 0, gross: 0 };
+      const settled = (agg && agg.settled[0]) || { count: 0, fees: 0 };
+      const refunded = (agg && agg.refunded[0]) || { count: 0, fees: 0 };
+
+      return {
+        success: true,
+        data: {
+          creator_id: cid.toString(),
+          owed: {
+            count: owed.count,
+            fees_cents: owed.fees,
+            fees_dollars: (owed.fees / 100).toFixed(2),
+            gross_cents: owed.gross,
+            gross_dollars: (owed.gross / 100).toFixed(2),
+          },
+          settled: {
+            count: settled.count,
+            fees_cents: settled.fees,
+            fees_dollars: (settled.fees / 100).toFixed(2),
+          },
+          refunded: {
+            count: refunded.count,
+            fees_cents: refunded.fees,
+            fees_dollars: (refunded.fees / 100).toFixed(2),
+          },
+          byCampaign: ((agg && agg.byCampaign) || []).map((c) => ({
+            campaign_id: c._id,
+            campaign_ref: c.campaign_ref || null,
+            title: c.title || 'Unknown campaign',
+            fees_cents: c.fees,
+            fees_dollars: (c.fees / 100).toFixed(2),
+            gross_cents: c.gross,
+            donation_count: c.count,
+          })),
+        },
+      };
+    } catch (error) {
+      console.error('Get creator fee statement error:', error);
       return { success: false, error: error.message };
     }
   }

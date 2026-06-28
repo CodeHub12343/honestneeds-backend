@@ -5,6 +5,7 @@ const User = require('../models/User');
 const TransactionService = require('../services/TransactionService');
 const FeeTrackingService = require('../services/FeeTrackingService');
 const paymentService = require('../services/paymentService');
+const feeEngine = require('../utils/feeEngine');
 const logger = require('../utils/winstonLogger');
 
 /**
@@ -189,32 +190,35 @@ class DonationController {
         });
       }
 
-      // Calculate fee breakdown
+      // Calculate fee breakdown via the canonical fee engine (R-4 — no inline rates).
+      const fee = feeEngine.calculateDonationFee(Math.round(amount * 100));
       const feeBreakdown = {
-        gross_cents: Math.round(amount * 100),
-        fee_cents: Math.round(amount * 100 * 0.2),
-        net_cents: Math.round(amount * 100 * 0.8),
-        platform_fee_percentage: 20,
-        gross_dollars: amount,
-        fee_dollars: amount * 0.2,
-        net_dollars: amount * 0.8
+        gross_cents: fee.grossCents,
+        fee_cents: fee.feeCents,
+        net_cents: fee.netCents,
+        platform_fee_percentage: fee.percent,
+        gross_dollars: fee.grossCents / 100,
+        fee_dollars: fee.feeCents / 100,
+        net_dollars: fee.netCents / 100,
       };
 
       // Get creator's payment details
       const creator = await User.findById(campaign.creator_id);
       const creatorPaymentMethod = creator?.payment_methods?.[0] || paymentMethod;
 
-      // Generate QR code data if applicable
+      // Manual model: the donor sends the FULL (gross) donation directly to the
+      // creator. The platform fee is owed by the creator to the platform (tracked
+      // on the fee-settlement ledger), NOT deducted from what the donor sends.
       let qrCodeData = null;
       if (paymentMethod === 'paypal') {
         qrCodeData = {
           method: 'paypal',
-          data: `paypal.me/${creator?.paypal_handle || 'honestneed'}/${feeBreakdown.net_dollars.toFixed(2)}`
+          data: `paypal.me/${creator?.paypal_handle || 'honestneed'}/${feeBreakdown.gross_dollars.toFixed(2)}`
         };
       } else if (paymentMethod === 'venmo') {
         qrCodeData = {
           method: 'venmo',
-          data: `venmo.com/${creator?.venmo_handle || 'honestneed'}/${feeBreakdown.net_dollars.toFixed(2)}`
+          data: `venmo.com/${creator?.venmo_handle || 'honestneed'}/${feeBreakdown.gross_dollars.toFixed(2)}`
         };
       }
 
@@ -243,23 +247,20 @@ class DonationController {
       // ✅ Add share reward information if created from referral
       if (donationResult.data.share_reward) {
         response.data.share_reward = donationResult.data.share_reward;
-        response.message += ` You also earned a ${donationResult.data.share_reward.amount_dollars} reward from your share, pending 30-day verification!`;
+        response.message += ` A ${donationResult.data.share_reward.amount_dollars} reward is now owed to the sharer, payable directly by the campaign creator!`;
 
         logger.info('🎉 DonationController: Donation from share referral with reward', {
           transactionId: donationResult.data._id,
           rewardAmount: donationResult.data.share_reward.amount_dollars,
-          holdUntilDate: donationResult.data.share_reward.hold_until_date,
+          rewardStatus: donationResult.data.share_reward.status,
         });
       }
 
-      // Track fee for admin dashboard
-      await FeeTrackingService.recordFee({
-        campaign_id: campaignId,
-        transaction_id: donationResult.data._id,
-        gross_cents: feeBreakdown.gross_cents,
-        fee_cents: feeBreakdown.fee_cents,
-        status: 'pending'
-      });
+      // NOTE: The platform fee is intentionally NOT recorded here. A manual
+      // donation starts as `pending` and the fee only becomes owed once the
+      // creator/admin confirms receipt — TransactionService.verifyTransaction
+      // records the fee at that point. This prevents fees accruing for
+      // unconfirmed or fake donation intents.
 
       res.status(201).json(response);
     } catch (error) {
@@ -298,11 +299,14 @@ class DonationController {
   static async markDonationSent(req, res) {
     try {
       const { campaignId, transactionId } = req.params;
+      const { proofUrl } = req.body || {};
       const supporterId = req.user._id;
 
-      // Fetch transaction
+      // Fetch transaction (accept either Mongo _id or public transaction_id)
       const Transaction = require('../models/Transaction');
-      const transaction = await Transaction.findById(transactionId);
+      const transaction = mongoose.Types.ObjectId.isValid(transactionId)
+        ? await Transaction.findById(transactionId)
+        : await Transaction.findOne({ transaction_id: transactionId });
 
       if (!transaction) {
         return res.status(404).json({
@@ -321,19 +325,30 @@ class DonationController {
         });
       }
 
-      // Update metadata with payment sent timestamp
-      transaction.notes.push({
-        timestamp: new Date(),
-        action: 'payment_sent',
-        performed_by: supporterId
-      });
-
-      // Add metadata
-      if (!transaction.metadata) {
-        transaction.metadata = {};
+      // Only a pending donation can be marked sent (a confirmed/rejected one is settled)
+      if (transaction.status !== 'pending') {
+        return res.status(409).json({
+          success: false,
+          error: 'INVALID_STATE',
+          message: `Donation is already ${transaction.status}; it cannot be marked as sent`,
+        });
       }
-      transaction.metadata.payment_sent_at = new Date();
-      transaction.metadata.payment_sent_ip = req.ip;
+
+      // CF-2: Optionally attach proof-of-payment (validated by the schema).
+      if (proofUrl) {
+        if (!/^https?:\/\/.+/.test(proofUrl)) {
+          return res.status(400).json({
+            success: false,
+            error: 'INVALID_PROOF_URL',
+            message: 'Proof URL must be a valid HTTP(S) URL',
+          });
+        }
+        transaction.proof_url = proofUrl;
+      }
+
+      // Record the donor's "I have sent the payment" signal on real fields.
+      transaction.payment_sent_at = new Date();
+      transaction.addNote('payment_sent', `Donor marked payment sent from ${req.ip}`, supporterId);
 
       await transaction.save();
 
@@ -707,7 +722,9 @@ class DonationController {
    * @private
    */
   static _buildPaymentInstructions(paymentMethod, feeBreakdown, creatorPaymentMethod) {
-    const netAmount = feeBreakdown.net_dollars.toFixed(2);
+    // Manual model: the donor sends the FULL (gross) donation to the creator.
+    const grossAmount = feeBreakdown.gross_dollars.toFixed(2);
+    const feePercent = feeBreakdown.platform_fee_percentage;
 
     const instructions = {
       method: paymentMethod,
@@ -717,55 +734,50 @@ class DonationController {
     switch (paymentMethod) {
       case 'paypal':
         instructions.steps = [
-          `Send $${netAmount} via PayPal to the creator`,
+          `Send $${grossAmount} via PayPal to the creator`,
           'Include this reference in the payment',
-          'Wait for creator to verify receipt',
-          'Your sweepstakes entries will be activated upon verification'
+          'Wait for the creator to confirm they received it'
         ];
         instructions.reference = 'Use donation transaction ID in payment note';
         break;
 
       case 'venmo':
         instructions.steps = [
-          `Send $${netAmount} on Venmo to the creator`,
-          'Make payment public so we can verify',
-          'Wait for verification (usually within 24 hours)',
-          'Your sweepstakes entries activate after verification'
+          `Send $${grossAmount} on Venmo to the creator`,
+          'Make the payment public so the creator can confirm it',
+          'Wait for confirmation (usually within 24 hours)'
         ];
         break;
 
       case 'bank_transfer':
         instructions.steps = [
-          `Transfer $${netAmount} via bank transfer`,
+          `Transfer $${grossAmount} via bank transfer`,
           'Include transaction ID as reference',
-          'Allow 2-3 business days for processing',
-          'Sweepstakes entries activate after verification'
+          'Allow 2-3 business days for processing'
         ];
-        instructions.note = 'Bank transfers may take longer to verify';
+        instructions.note = 'Bank transfers may take longer to confirm';
         break;
 
       case 'stripe':
         instructions.steps = [
-          `Complete Stripe payment for $${netAmount}`,
+          `Complete Stripe payment for $${grossAmount}`,
           'Payment will be instant',
-          'Creator receives notification immediately',
-          'Sweepstakes entries activate after verification'
+          'The creator confirms receipt before it counts'
         ];
         break;
 
       default:
         instructions.steps = [
-          `Send $${netAmount} to creator using ${paymentMethod}`,
+          `Send $${grossAmount} to creator using ${paymentMethod}`,
           'Include transaction reference in payment',
-          'Wait for verification',
-          'Sweepstakes entries activate after verification'
+          'Wait for the creator to confirm receipt'
         ];
     }
 
-    instructions.total_to_send = netAmount;
+    instructions.total_to_send = grossAmount;
     instructions.platform_fee = feeBreakdown.fee_dollars.toFixed(2);
-    instructions.gross_amount = feeBreakdown.gross_dollars.toFixed(2);
-    instructions.fee_breakdown = `We take 20% ($${feeBreakdown.fee_dollars.toFixed(2)}) as platform fee. Creator receives $${netAmount}.`;
+    instructions.gross_amount = grossAmount;
+    instructions.fee_breakdown = `You send the full $${grossAmount} to the creator. The platform fee (${feePercent}%, $${feeBreakdown.fee_dollars.toFixed(2)}) is settled separately by the campaign creator.`;
 
     return instructions;
   }
@@ -982,6 +994,493 @@ class DonationController {
   static async exportDonationsCSV(req, res) {
     req.query.format = 'csv';
     return DonationController.exportDonations(req, res);
+  }
+
+  /**
+   * GET /campaigns/:campaignId/donations/pending
+   * CF-1: Manual-donation confirmation queue.
+   * Lists donations awaiting the creator's "I received this" confirmation,
+   * with proof-of-payment and "donor marked sent" status so the confirmer has
+   * something concrete to verify. Creator or admin only.
+   */
+  static async getPendingDonations(req, res) {
+    try {
+      const { campaignId } = req.params;
+      const userId = req.user._id;
+      const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+      const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 25));
+      const skip = (page - 1) * limit;
+
+      const campaign = await Campaign.findById(campaignId);
+      if (!campaign) {
+        return res.status(404).json({
+          success: false,
+          error: 'CAMPAIGN_NOT_FOUND',
+          message: 'Campaign does not exist',
+        });
+      }
+
+      // Authorization: creator or admin
+      const isAdmin = !!(req.user.is_admin || req.user.roles?.includes('admin'));
+      const isCreator = campaign.creator_id.toString() === userId.toString();
+      if (!isAdmin && !isCreator) {
+        return res.status(403).json({
+          success: false,
+          error: 'FORBIDDEN',
+          message: 'Only the campaign creator or an admin can view the confirmation queue',
+        });
+      }
+
+      const query = {
+        campaign_id: campaign._id,
+        transaction_type: 'donation',
+        status: 'pending',
+      };
+
+      const [transactions, total] = await Promise.all([
+        Transaction.find(query)
+          .sort({ payment_sent_at: -1, created_at: -1 })
+          .skip(skip)
+          .limit(limit)
+          .populate('supporter_id', 'email full_name display_name first_name last_name')
+          .lean(),
+        Transaction.countDocuments(query),
+      ]);
+
+      const data = transactions.map((t) => {
+        const donor = t.supporter_id;
+        const donorName = donor
+          ? (donor.display_name ||
+             donor.full_name ||
+             [donor.first_name, donor.last_name].filter(Boolean).join(' ') ||
+             donor.email ||
+             'Donor')
+          : 'Deleted user';
+        return {
+          transaction_id: t.transaction_id,
+          _id: t._id,
+          donor_name: donorName,
+          donor_email: donor?.email || null,
+          amount_dollars: (t.amount_cents / 100).toFixed(2),
+          amount_cents: t.amount_cents,
+          net_amount_cents: t.net_amount_cents,
+          payment_method: t.payment_method,
+          proof_url: t.proof_url || null,
+          payment_marked_sent: !!t.payment_sent_at,
+          payment_sent_at: t.payment_sent_at || null,
+          has_referral: !!t.referral_code,
+          created_at: t.created_at,
+        };
+      });
+
+      return res.status(200).json({
+        success: true,
+        data,
+        summary: {
+          pending_count: campaign.metrics?.pending_donations || 0,
+          pending_amount_dollars: ((campaign.metrics?.pending_donation_amount || 0) / 100).toFixed(2),
+        },
+        pagination: {
+          page,
+          limit,
+          total,
+          pages: Math.ceil(total / limit),
+        },
+      });
+    } catch (error) {
+      console.error('Get pending donations error:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'FETCH_FAILED',
+        message: 'Failed to retrieve pending donations',
+      });
+    }
+  }
+
+  /**
+   * POST /campaigns/:campaignId/donations/:transactionId/confirm
+   * CF-1: Creator (or admin) confirms they received the manual payment.
+   * Transitions the donation pending → verified and applies verified accounting.
+   */
+  static async confirmDonation(req, res) {
+    try {
+      const { transactionId } = req.params;
+      const actorId = req.user._id;
+
+      const txId = await DonationController._resolveTransactionObjectId(transactionId);
+      if (!txId) {
+        return res.status(404).json({
+          success: false,
+          error: 'TRANSACTION_NOT_FOUND',
+          message: 'Transaction does not exist',
+        });
+      }
+
+      const transaction = await TransactionService.verifyTransaction(txId, actorId);
+
+      return res.status(200).json({
+        success: true,
+        message: 'Donation confirmed. It now counts toward the campaign total.',
+        data: {
+          transaction_id: transaction.transaction_id,
+          status: transaction.status,
+          confirmed_by_role: transaction.confirmed_by_role,
+          verified_at: transaction.verified_at,
+          amount_dollars: (transaction.amount_cents / 100).toFixed(2),
+        },
+      });
+    } catch (error) {
+      return DonationController._sendConfirmationError(res, error);
+    }
+  }
+
+  /**
+   * POST /campaigns/:campaignId/donations/:transactionId/reject
+   * CF-1: Creator (or admin) rejects a donation (not received / fraudulent).
+   * Reverses any accounting that had been applied (reversible — fixes F-2).
+   */
+  static async rejectDonationReceipt(req, res) {
+    try {
+      const { transactionId } = req.params;
+      const { reason } = req.body || {};
+      const actorId = req.user._id;
+
+      if (!reason || reason.trim().length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'REASON_REQUIRED',
+          message: 'A rejection reason is required',
+        });
+      }
+
+      const txId = await DonationController._resolveTransactionObjectId(transactionId);
+      if (!txId) {
+        return res.status(404).json({
+          success: false,
+          error: 'TRANSACTION_NOT_FOUND',
+          message: 'Transaction does not exist',
+        });
+      }
+
+      const transaction = await TransactionService.rejectTransaction(txId, actorId, reason.trim());
+
+      return res.status(200).json({
+        success: true,
+        message: 'Donation rejected. Any prior totals have been reversed.',
+        data: {
+          transaction_id: transaction.transaction_id,
+          status: transaction.status,
+          rejection_reason: transaction.rejection_reason,
+          rejected_at: transaction.rejected_at,
+        },
+      });
+    } catch (error) {
+      return DonationController._sendConfirmationError(res, error);
+    }
+  }
+
+  /**
+   * POST /campaigns/:campaignId/donations/:transactionId/proof
+   * CF-2: Donor uploads proof-of-payment (image). uploadMiddleware has already
+   * pushed the file to Cloudinary (field name `image`) and exposed the URL on
+   * req.file.image_url. Stores it on the transaction and marks payment as sent.
+   * Donor only; pending donations only.
+   */
+  static async uploadDonationProof(req, res) {
+    try {
+      const { transactionId } = req.params;
+      const supporterId = req.user._id;
+
+      const proofUrl = req.file?.image_url;
+      if (!proofUrl) {
+        return res.status(400).json({
+          success: false,
+          error: 'NO_PROOF_FILE',
+          message: 'A proof image file is required (form field name "image")',
+        });
+      }
+
+      const transaction = mongoose.Types.ObjectId.isValid(transactionId)
+        ? await Transaction.findById(transactionId)
+        : await Transaction.findOne({ transaction_id: transactionId });
+
+      if (!transaction) {
+        return res.status(404).json({
+          success: false,
+          error: 'TRANSACTION_NOT_FOUND',
+          message: 'Transaction does not exist',
+        });
+      }
+
+      if (transaction.supporter_id.toString() !== supporterId.toString()) {
+        return res.status(403).json({
+          success: false,
+          error: 'FORBIDDEN',
+          message: 'You can only attach proof to your own donations',
+        });
+      }
+
+      if (transaction.status !== 'pending') {
+        return res.status(409).json({
+          success: false,
+          error: 'INVALID_STATE',
+          message: `Donation is already ${transaction.status}; proof cannot be attached`,
+        });
+      }
+
+      transaction.proof_url = proofUrl;
+      transaction.payment_sent_at = new Date();
+      transaction.addNote(
+        'payment_proof_uploaded',
+        `Donor uploaded proof of payment from ${req.ip}`,
+        supporterId
+      );
+      await transaction.save();
+
+      return res.status(200).json({
+        success: true,
+        message: 'Proof of payment uploaded. The creator will confirm receipt.',
+        data: {
+          transaction_id: transaction.transaction_id,
+          status: transaction.status,
+          proof_url: transaction.proof_url,
+          payment_sent_at: transaction.payment_sent_at,
+        },
+      });
+    } catch (error) {
+      console.error('Upload donation proof error:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'UPLOAD_FAILED',
+        message: 'Failed to attach proof of payment',
+      });
+    }
+  }
+
+  /**
+   * GET /donations/fees/statement
+   * CF-3: The authenticated creator's platform-fee statement — what they owe the
+   * platform for confirmed donations (manual model: donors paid the creator
+   * directly, so the fee is owed back to the platform), plus settled & reversed
+   * history and a per-campaign breakdown.
+   */
+  static async getCreatorFeeStatement(req, res) {
+    try {
+      const creatorId = req.user._id;
+      const result = await FeeTrackingService.getCreatorFeeStatement(creatorId);
+      if (!result.success) {
+        return res.status(500).json({
+          success: false,
+          error: 'FEE_STATEMENT_FAILED',
+          message: result.error || 'Failed to compute fee statement',
+        });
+      }
+      return res.status(200).json(result);
+    } catch (error) {
+      console.error('Creator fee statement error:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'FEE_STATEMENT_FAILED',
+        message: 'Failed to compute fee statement',
+      });
+    }
+  }
+
+  /**
+   * POST /donations/:donationId/refund-request
+   * CE-7: Donor requests a refund on their own donation. Body: { reason }.
+   */
+  static async requestRefund(req, res) {
+    try {
+      const { donationId } = req.params;
+      const { reason } = req.body || {};
+      const donorId = req.user._id;
+
+      if (!reason || reason.trim().length === 0) {
+        return res.status(400).json({ success: false, error: 'REASON_REQUIRED', message: 'A refund reason is required' });
+      }
+
+      const txId = await DonationController._resolveTransactionObjectId(donationId);
+      if (!txId) {
+        return res.status(404).json({ success: false, error: 'TRANSACTION_NOT_FOUND', message: 'Donation does not exist' });
+      }
+
+      const tx = await TransactionService.requestRefund(txId, donorId, reason.trim());
+      return res.status(200).json({
+        success: true,
+        message: 'Refund request submitted. The campaign creator will review it.',
+        data: {
+          transaction_id: tx.transaction_id,
+          refund_request: tx.refund_request,
+        },
+      });
+    } catch (error) {
+      return DonationController._sendRefundError(res, error);
+    }
+  }
+
+  /**
+   * GET /campaigns/:campaignId/refund-requests
+   * CE-7: Creator/admin lists refund requests for a campaign.
+   * Query: status (requested|approved|declined, default requested), page, limit.
+   */
+  static async getCampaignRefundRequests(req, res) {
+    try {
+      const { campaignId } = req.params;
+      const actorId = req.user._id;
+      const result = await TransactionService.getCampaignRefundRequests(campaignId, actorId, {
+        status: req.query.status,
+        page: req.query.page,
+        limit: req.query.limit,
+      });
+      return res.status(200).json({ success: true, ...result });
+    } catch (error) {
+      return DonationController._sendRefundError(res, error);
+    }
+  }
+
+  /**
+   * POST /donations/:donationId/refund-request/decide
+   * CE-7: Creator/admin approves or declines a refund request.
+   * Body: { decision: 'approve'|'decline', note? }.
+   */
+  static async decideRefundRequest(req, res) {
+    try {
+      const { donationId } = req.params;
+      const { decision, note } = req.body || {};
+      const actorId = req.user._id;
+
+      if (!['approve', 'decline'].includes(decision)) {
+        return res.status(400).json({ success: false, error: 'INVALID_DECISION', message: 'decision must be "approve" or "decline"' });
+      }
+
+      const txId = await DonationController._resolveTransactionObjectId(donationId);
+      if (!txId) {
+        return res.status(404).json({ success: false, error: 'TRANSACTION_NOT_FOUND', message: 'Donation does not exist' });
+      }
+
+      const tx = await TransactionService.decideRefundRequest(txId, actorId, decision, (note || '').trim());
+      return res.status(200).json({
+        success: true,
+        message: decision === 'approve'
+          ? 'Refund approved. The donation has been reversed.'
+          : 'Refund request declined.',
+        data: {
+          transaction_id: tx.transaction_id,
+          status: tx.status,
+          refund_request: tx.refund_request,
+        },
+      });
+    } catch (error) {
+      return DonationController._sendRefundError(res, error);
+    }
+  }
+
+  /**
+   * GET /donations/dashboard
+   * CE-2: Donor dashboard summary — counts/totals by status for the current user.
+   */
+  static async getDonorDashboard(req, res) {
+    try {
+      const userId = req.user._id;
+      const rows = await Transaction.aggregate([
+        { $match: { supporter_id: new mongoose.Types.ObjectId(userId), transaction_type: 'donation' } },
+        { $group: { _id: '$status', count: { $sum: 1 }, amountCents: { $sum: '$amount_cents' } } },
+      ]);
+
+      const byStatus = {};
+      let totalCount = 0;
+      let verifiedCents = 0;
+      for (const r of rows) {
+        byStatus[r._id] = { count: r.count, amount_dollars: (r.amountCents / 100).toFixed(2) };
+        totalCount += r.count;
+        if (r._id === 'verified') verifiedCents = r.amountCents;
+      }
+
+      // Open (pending-decision) refund requests by this donor.
+      const openRefundRequests = await Transaction.countDocuments({
+        supporter_id: userId,
+        transaction_type: 'donation',
+        'refund_request.status': 'requested',
+      });
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          total_donations: totalCount,
+          total_confirmed_dollars: (verifiedCents / 100).toFixed(2),
+          by_status: byStatus,
+          pending_confirmation: byStatus.pending?.count || 0,
+          open_refund_requests: openRefundRequests,
+        },
+      });
+    } catch (error) {
+      console.error('Donor dashboard error:', error);
+      return res.status(500).json({ success: false, error: 'DASHBOARD_FAILED', message: 'Failed to load donor dashboard' });
+    }
+  }
+
+  /**
+   * Map refund-flow service errors to HTTP responses.
+   * @private
+   */
+  static _sendRefundError(res, error) {
+    const msg = error.message || 'Operation failed';
+    let statusCode = 500;
+    if (msg.includes('NOT_FOUND')) statusCode = 404;
+    else if (msg.includes('UNAUTHORIZED')) statusCode = 403;
+    else if (
+      msg.includes('INVALID_STATE') || msg.includes('INVALID_TYPE') ||
+      msg.includes('REASON_REQUIRED') || msg.includes('INVALID_DECISION') ||
+      msg.includes('CAMPAIGN_DELETED')
+    ) {
+      statusCode = 400;
+    }
+    console.error('Refund flow error:', msg);
+    return res.status(statusCode).json({
+      success: false,
+      error: msg.split(':')[1]?.trim() || 'OPERATION_FAILED',
+      message: msg,
+    });
+  }
+
+  /**
+   * Resolve a route param (Mongo _id or public transaction_id) to a Mongo _id.
+   * @returns {Promise<ObjectId|null>}
+   * @private
+   */
+  static async _resolveTransactionObjectId(idOrTransactionId) {
+    if (mongoose.Types.ObjectId.isValid(idOrTransactionId)) {
+      return idOrTransactionId;
+    }
+    const tx = await Transaction.findOne({ transaction_id: idOrTransactionId }).select('_id').lean();
+    return tx ? tx._id : null;
+  }
+
+  /**
+   * Map verify/reject service errors to HTTP responses.
+   * @private
+   */
+  static _sendConfirmationError(res, error) {
+    const msg = error.message || 'Operation failed';
+    let statusCode = 500;
+    if (msg.includes('NOT_FOUND')) statusCode = 404;
+    else if (msg.includes('UNAUTHORIZED')) statusCode = 403;
+    else if (
+      msg.includes('INVALID_STATE') ||
+      msg.includes('INVALID_TYPE') ||
+      msg.includes('REASON_REQUIRED') ||
+      msg.includes('SUPPORTER_DELETED') ||
+      msg.includes('CAMPAIGN_DELETED')
+    ) {
+      statusCode = 400;
+    }
+    console.error('Donation confirmation error:', msg);
+    return res.status(statusCode).json({
+      success: false,
+      error: msg.split(':')[1]?.trim() || 'OPERATION_FAILED',
+      message: msg,
+    });
   }
 }
 

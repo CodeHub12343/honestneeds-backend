@@ -18,7 +18,16 @@ const feeTransactionSchema = new mongoose.Schema({
     ref: 'Campaign',
     index: true
   },
-  
+  // CF-3: the creator who OWES this fee. Manual donations go donor → creator
+  // directly, so the platform fee is an amount the creator owes the platform.
+  // Stored directly (not just via campaign) for fast per-creator statements.
+  creator_id: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    index: true,
+    default: null
+  },
+
   // Amount tracking (in cents)
   gross_amount_cents: {
     type: Number,
@@ -88,6 +97,7 @@ const feeTransactionSchema = new mongoose.Schema({
 
 // Indexes for performance
 feeTransactionSchema.index({ campaign_id: 1, status: 1 });
+feeTransactionSchema.index({ creator_id: 1, status: 1, settled_at: 1 }); // creator fee statements
 feeTransactionSchema.index({ settlement_id: 1 });
 feeTransactionSchema.index({ created_at: -1 });
 

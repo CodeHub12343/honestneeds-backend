@@ -38,16 +38,35 @@ const shareWithdrawalSchema = new mongoose.Schema(
             required: true,
             min: 0,
           },
+          // Per-slice payment state. In the manual model each campaign's creator
+          // pays their own sharers off-platform and marks THEIR slice paid. The
+          // withdrawal only completes once every slice is paid. 'disputed' lets a
+          // creator flag a claim they believe is fraudulent/incorrect.
+          status: {
+            type: String,
+            enum: ['pending', 'paid', 'cancelled', 'disputed'],
+            default: 'pending',
+          },
+          paid_at: { type: Date, default: null },
+          paid_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+          transaction_reference: { type: String, default: null },
+          // F-2: proof-of-payment screenshot URL (mirrors donor proof, CF-2).
+          payment_proof_url: { type: String, default: null },
+          // Trust-based dispute: creator contests this slice (reason + timestamp).
+          dispute_reason: { type: String, default: null },
+          disputed_at: { type: Date, default: null },
+          disputed_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+          // F-3: sharer confirms they received the money (completes the timeline).
+          received_at: { type: Date, default: null },
+          // F-4: auto-reminder bookkeeping (creator nudges for unpaid claims).
+          last_reminder_at: { type: Date, default: null },
+          reminder_count: { type: Number, default: 0 },
+          cancelled_at: { type: Date, default: null },
         }
       ],
       default: [],
-      validate: {
-        validator: function(v) {
-          // If campaign_withdrawals is provided, must have at least one entry
-          return v.length > 0;
-        },
-        message: 'Campaign withdrawals must have at least one campaign',
-      },
+      // Optional: a withdrawal may be global (drawn from the user's cleared balance)
+      // or itemized per campaign. When provided, each entry carries its own amount.
     },
 
     // Amount information (in cents)

@@ -65,8 +65,11 @@ const paymentMethodSchema = new mongoose.Schema(
     bank_account_number: {
       type: String,
       default: null,
-      // Full account number - stored for creator payout processing
-      // In production, should be encrypted at rest
+      // Full account number — needed so the campaign creator can pay the sharer
+      // off-platform (manual model). C-3: ENCRYPTED at rest (AES-256-GCM,
+      // enc:v1:… envelope, see utils/fieldEncryption). Written encrypted by
+      // PaymentMethodController.createPaymentMethod; decrypted only on the owning
+      // creator's payout views (CampaignPayoutController) with an audit trail.
     },
     bank_account_holder: {
       type: String,
@@ -88,8 +91,8 @@ const paymentMethodSchema = new mongoose.Schema(
     bank_routing_number: {
       type: String,
       default: null,
-      // Full routing number - stored for creator payout processing
-      // In production, should be encrypted at rest
+      // Full routing number — see bank_account_number above. C-3: ENCRYPTED at
+      // rest and decrypted only for the owning creator's payout views.
     },
     plaid_account_id: {
       type: String,

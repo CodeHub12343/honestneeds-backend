@@ -14,7 +14,8 @@
 
 const express = require('express');
 const userController = require('../controllers/userController');
-const { authMiddleware } = require('../middleware/authMiddleware');
+const profileController = require('../controllers/ProfileController');
+const { authMiddleware, optionalAuthMiddleware } = require('../middleware/authMiddleware');
 const { createUploadMiddleware } = require('../middleware/uploadMiddleware');
 
 const router = express.Router();
@@ -24,6 +25,27 @@ const avatarUploadMiddleware = createUploadMiddleware({
   folder: 'honestneed/avatars',
   maxFileSize: 5 * 1024 * 1024, // 5MB
 });
+
+// ──────────────────────────────────────────────────────────────────────
+// Profile system (Level 1-4) — these MUST be declared before the generic
+// `/:id` routes below so static segments aren't captured as an :id param.
+// ──────────────────────────────────────────────────────────────────────
+
+// Authenticated profile dashboard + setup/editing
+router.get('/me/profile', authMiddleware, profileController.getMyDashboard);
+router.patch('/me/profile', authMiddleware, profileController.updateMyProfile);
+router.get('/me/profile/completion', authMiddleware, profileController.getMyCompletion);
+router.get('/me/profile/strength', authMiddleware, profileController.getMyStrength);
+router.get('/me/gamification', authMiddleware, profileController.getMyGamification);
+
+// Username availability (auth optional so it works pre-registration and excludes self)
+router.get('/username-available', optionalAuthMiddleware, profileController.checkUsername);
+
+// XP leaderboard (public)
+router.get('/leaderboard', profileController.getLeaderboard);
+
+// Public profile by id or username (auth optional → richer view for owner)
+router.get('/profile/:idOrUsername', optionalAuthMiddleware, profileController.getPublicProfile);
 
 /**
  * GET /users/:id

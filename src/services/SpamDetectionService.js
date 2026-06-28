@@ -190,11 +190,13 @@ class SpamDetectionService {
 
     const campaign = await Campaign.findById(share.campaign_id);
 
-    // Refund reward if it was paid
+    // Claw the reward back into the budget if it was paid. Trust-based: return
+    // it to the liability counter and reduce the cumulative-accrued total.
     if (share.is_paid && share.reward_amount > 0) {
       await Campaign.findByIdAndUpdate(share.campaign_id, {
         $inc: {
-          'share_config.current_budget_remaining': share.reward_amount,
+          'share_config.committed_budget_remaining': share.reward_amount,
+          'share_config.committed_total': -share.reward_amount,
         },
       });
 

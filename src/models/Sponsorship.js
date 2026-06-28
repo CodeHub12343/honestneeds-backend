@@ -25,6 +25,10 @@ const SponsorshipSchema = new mongoose.Schema(
   {
     // ── Identification ──────────────────────────────────────────
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    // Optional link to a BusinessProfile (BU-03 analytics / BU-04 CSR rollups).
+    // Set when the sponsoring user has a business profile, or passed explicitly
+    // at checkout. Indexed for the business analytics aggregation.
+    businessId: { type: mongoose.Schema.Types.ObjectId, ref: 'BusinessProfile', default: null, index: true },
     tierId: { type: String, required: true },
     tierName: { type: String, required: true },
 

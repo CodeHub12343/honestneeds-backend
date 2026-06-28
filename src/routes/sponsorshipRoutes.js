@@ -17,7 +17,7 @@
 
 const express = require('express');
 const SponsorshipController = require('../controllers/SponsorshipController');
-const { authenticate, authorize } = require('../middleware/authMiddleware');
+const { authenticate, authorize, optionalAuthMiddleware } = require('../middleware/authMiddleware');
 
 const router = express.Router();
 
@@ -33,9 +33,12 @@ router.get('/public', SponsorshipController.getPublicSponsors);
 
 /**
  * POST /api/sponsorships/create
- * Create a new sponsorship after checkout
+ * Create a new sponsorship after checkout.
+ * Optional auth: if a logged-in user has a business profile, the sponsorship is
+ * auto-linked to it (businessId) for BU-03 analytics / BU-04 CSR rollups. Guest
+ * checkout still works without a token.
  */
-router.post('/create', SponsorshipController.createSponsorship);
+router.post('/create', optionalAuthMiddleware, SponsorshipController.createSponsorship);
 
 /**
  * PATCH /api/sponsorships/:id/onboard

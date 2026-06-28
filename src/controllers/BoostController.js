@@ -103,7 +103,10 @@ class BoostController {
 
       // If free tier
       if (sessionData.isFree) {
-        // Create free boost record
+        // Create free boost record. Note: the free tier is "standard placement"
+        // (1x visibility), so it is recorded for tracking but intentionally does
+        // NOT set Campaign.is_boosted / boost_weight — only paid boosts affect
+        // listing rank. (Keeps ranking consistent; see CampaignService sort.)
         const tierData = StripeBoostService.BOOST_TIERS.free;
         const endDate = new Date();
         endDate.setDate(endDate.getDate() + tierData.duration_days);
@@ -353,6 +356,18 @@ class BoostController {
       boost.renewal_count += 1;
       await boost.save();
 
+      // Re-assert the campaign's ranking flags so the extension takes effect
+      // immediately (rather than waiting for / being undone by the expiry job).
+      // Only paid boosts affect rank; free boosts leave the flags untouched.
+      if (boost.tier !== 'free') {
+        await Campaign.findByIdAndUpdate(boost.campaign_id, {
+          is_boosted: true,
+          current_boost_tier: boost.tier,
+          boost_weight: boost.visibility_weight,
+          last_boost_date: new Date(),
+        });
+      }
+
       winstonLogger.info('Boost extended', {
         boostId: boost._id,
         campaignId: boost.campaign_id,
@@ -412,6 +427,10 @@ class BoostController {
       boost.cancellation_reason = reason || 'user_cancelled';
       await boost.save();
 
+      // Recompute the campaign's ranking flags from any boosts that remain valid
+      // so a cancelled boost stops affecting listing rank immediately.
+      await CampaignBoost.reconcileCampaignFlags(boost.campaign_id);
+
       winstonLogger.info('Boost cancelled', {
         boostId: boost._id,
         campaignId: boost.campaign_id,
@@ -444,6 +463,8 @@ class BoostController {
     try {
       const { boost_id } = req.params;
       const { views, engagement, conversions } = req.body;
+      const requester_id = req.user.id;
+      const isAdmin = !!(req.user.is_admin || req.user.roles?.includes('admin'));
 
       const boost = await CampaignBoost.findById(boost_id);
 
@@ -451,6 +472,16 @@ class BoostController {
         return res.status(404).json({
           success: false,
           message: 'Boost not found',
+        });
+      }
+
+      // Stats are normally auto-tracked from real activity (views/shares/
+      // conversions). This manual override is restricted to the boost owner or
+      // an admin so one user can't rewrite another creator's performance numbers.
+      if (!isAdmin && boost.creator_id.toString() !== requester_id) {
+        return res.status(403).json({
+          success: false,
+          message: 'You do not have permission to update this boost',
         });
       }
 

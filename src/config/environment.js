@@ -11,7 +11,7 @@ const simpleLogger = {
   info: (msg, data) => console.log('[ENVCONFIG] INFO:', msg, data || ''),
 };
 
-/**
+/* *
  * Define required environment variables across different runtime environments
  */
 const REQUIRED_VARS = {
@@ -225,6 +225,26 @@ const getConfig = () => ({
     password: process.env.REDIS_PASSWORD,
     tls: process.env.REDIS_TLS === 'true',
   },
+  ai: (() => {
+    // AI subsystem (AI-01..AI-12). The backend is selected by AI_PROVIDER:
+    //   "anthropic" (Claude, default) or "gemini" (Google AI Studio).
+    // Optional: when the active provider's key is absent the AI features run in
+    // degraded heuristic mode and never block requests.
+    const provider = (process.env.AI_PROVIDER || 'anthropic').toLowerCase();
+    const isGemini = provider === 'gemini' || provider === 'google';
+    const apiKey = isGemini ? process.env.GEMINI_API_KEY : process.env.ANTHROPIC_API_KEY;
+    return {
+      provider,
+      enabled: Boolean(apiKey) && process.env.AI_DISABLED !== 'true',
+      apiKey,
+      model: isGemini
+        ? process.env.GEMINI_MODEL || 'gemini-2.5-pro'
+        : process.env.AI_MODEL || 'claude-opus-4-8',
+      fastModel: isGemini
+        ? process.env.GEMINI_FAST_MODEL || 'gemini-2.5-flash'
+        : process.env.AI_FAST_MODEL || 'claude-haiku-4-5',
+    };
+  })(),
 });
 
 module.exports = {

@@ -10,7 +10,19 @@
  * - Archive old activities
  */
 
+const mongoose = require('mongoose');
 const winstonLogger = require('../utils/winstonLogger');
+const Notification = require('../models/Notification');
+
+/**
+ * Maps a UI filter key to the set of Notification `type` values it covers.
+ */
+const FILTER_TYPE_GROUPS = {
+  messages: ['new_message'],
+  donations: ['donation_received', 'goal_reached'],
+  campaigns: ['campaign_activated', 'campaign_ended', 'goal_reached'],
+  system: ['system_alert', 'admin_message'],
+};
 
 class ActivityFeedService {
   /**
@@ -33,32 +45,32 @@ class ActivityFeedService {
     metadata = {},
   }) {
     try {
-      // In production, save to database (MongoDB)
-      // This is a placeholder showing the structure
-      const activity = {
-        id: `activity_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      // Persist + deliver through the unified dispatcher. `eventType` is treated
+      // as a notification type when known; otherwise it falls back to a generic
+      // system_alert so the activity is still recorded in the feed. Title and
+      // description are passed as overrides so existing callers keep their copy.
+      const NotificationDispatcher = require('./NotificationDispatcher');
+      const { getType } = require('../notifications/notificationTypes');
+      const type = getType(eventType) ? eventType : 'system_alert';
+
+      const result = await NotificationDispatcher.notify({
         userId,
-        eventType,
-        campaignId,
-        title,
-        description,
-        metadata,
-        read: false,
-        createdAt: new Date(),
-        archivedAt: null,
-      };
+        type,
+        data: { campaign_id: campaignId, ...metadata },
+        overrides: {
+          ...(title ? { title } : {}),
+          ...(description ? { message: description } : {}),
+        },
+      });
 
       winstonLogger.info('📝 Activity recorded', {
         userId,
         eventType,
         campaignId,
-        activityId: activity.id,
+        notificationId: result.notificationId,
       });
 
-      // TODO: Save to MongoDB Activity collection
-      // await Activity.create(activity);
-
-      return activity;
+      return result;
     } catch (error) {
       winstonLogger.error('❌ Error recording activity', {
         userId,
@@ -76,17 +88,20 @@ class ActivityFeedService {
    * @param {number} offset - Pagination offset
    * @returns {Promise<Object[]>}
    */
-  static async getRecentActivity(userId, limit = 20, offset = 0) {
+  static async getRecentActivity(userId, limit = 20, offset = 0, filter = null) {
     try {
-      // TODO: Query MongoDB Activity collection
-      // const activities = await Activity.find({ userId, archivedAt: null })
-      //   .sort({ createdAt: -1 })
-      //   .limit(limit)
-      //   .skip(offset);
-      // return activities;
+      const query = { user_id: userId, archived: false };
+      if (filter && filter !== 'all' && FILTER_TYPE_GROUPS[filter]) {
+        query.type = { $in: FILTER_TYPE_GROUPS[filter] };
+      }
 
-      // Placeholder: return empty array
-      return [];
+      const activities = await Notification.find(query)
+        .sort({ created_at: -1 })
+        .skip(offset)
+        .limit(limit)
+        .lean();
+
+      return activities;
     } catch (error) {
       winstonLogger.error('❌ Error fetching activity', {
         userId,
@@ -103,15 +118,11 @@ class ActivityFeedService {
    */
   static async getUnreadCount(userId) {
     try {
-      // TODO: Query MongoDB
-      // const count = await Activity.countDocuments({
-      //   userId,
-      //   read: false,
-      //   archivedAt: null,
-      // });
-      // return count;
-
-      return 0;
+      return await Notification.countDocuments({
+        user_id: userId,
+        read: false,
+        archived: false,
+      });
     } catch (error) {
       winstonLogger.error('❌ Error fetching unread count', {
         userId,
@@ -129,15 +140,15 @@ class ActivityFeedService {
    */
   static async markActivityAsRead(activityId, userId) {
     try {
-      // TODO: Update MongoDB
-      // const activity = await Activity.findOneAndUpdate(
-      //   { _id: activityId, userId },
-      //   { read: true, readAt: new Date() },
-      //   { new: true }
-      // );
-      // return activity;
-
-      return { success: true };
+      if (!mongoose.isValidObjectId(activityId)) {
+        return { success: false };
+      }
+      const updated = await Notification.findOneAndUpdate(
+        { _id: activityId, user_id: userId },
+        { read: true, read_at: new Date() },
+        { new: true }
+      ).lean();
+      return updated || { success: false };
     } catch (error) {
       winstonLogger.error('❌ Error marking activity as read', {
         activityId,
@@ -155,14 +166,11 @@ class ActivityFeedService {
    */
   static async markAllAsRead(userId) {
     try {
-      // TODO: Update MongoDB
-      // const result = await Activity.updateMany(
-      //   { userId, read: false, archivedAt: null },
-      //   { read: true, readAt: new Date() }
-      // );
-      // return result;
-
-      return { modifiedCount: 0 };
+      const result = await Notification.updateMany(
+        { user_id: userId, read: false, archived: false },
+        { read: true, read_at: new Date() }
+      );
+      return { modifiedCount: result.modifiedCount || 0 };
     } catch (error) {
       winstonLogger.error('❌ Error marking all as read', {
         userId,
@@ -180,14 +188,13 @@ class ActivityFeedService {
    */
   static async archiveActivity(activityId, userId) {
     try {
-      // TODO: Update MongoDB
-      // const activity = await Activity.findOneAndUpdate(
-      //   { _id: activityId, userId },
-      //   { archivedAt: new Date() },
-      //   { new: true }
-      // );
-      // return activity;
-
+      if (!mongoose.isValidObjectId(activityId)) {
+        return { success: false };
+      }
+      await Notification.findOneAndUpdate(
+        { _id: activityId, user_id: userId },
+        { archived: true, archived_at: new Date() }
+      );
       return { success: true };
     } catch (error) {
       winstonLogger.error('❌ Error archiving activity', {

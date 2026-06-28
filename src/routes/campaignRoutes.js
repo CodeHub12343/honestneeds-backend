@@ -12,9 +12,31 @@ const CampaignController = require('../controllers/campaignController');
 const DonationController = require('../controllers/DonationController');
 const ShareController = require('../controllers/ShareController');
 const VolunteerOfferController = require('../controllers/VolunteerOfferController');
+const CampaignEngagementController = require('../controllers/campaignEngagementController');
 const campaignUpdateRoutes = require('./campaignUpdateRoutes');
+const campaignCommentRoutes = require('./campaignCommentRoutes');
+const campaignMilestoneRoutes = require('./campaignMilestoneRoutes');
 const uploadMiddleware = require('../middleware/uploadMiddleware');
+const { createUploadMiddleware } = require('../middleware/uploadMiddleware');
 const { authMiddleware } = require('../middleware/authMiddleware');
+
+// CF-2: dedicated uploader for donor proof-of-payment images (own Cloudinary folder, 5MB cap)
+const donationProofUpload = createUploadMiddleware({
+  folder: 'honestneed/donation-proofs',
+  maxFileSize: 5 * 1024 * 1024,
+});
+
+// G-7: uploader for Transformation Journey images (own folder, 10MB cap).
+const journeyImageUpload = createUploadMiddleware({
+  folder: 'honestneed/journeys',
+  maxFileSize: 10 * 1024 * 1024,
+});
+
+// F-2: uploader for payout proof-of-payment screenshots (optional file, 5MB cap).
+const payoutProofUpload = createUploadMiddleware({
+  folder: 'honestneed/payout-proofs',
+  maxFileSize: 5 * 1024 * 1024,
+});
 const {
   validateRecordShare,
   validateGetShareMetrics,
@@ -32,7 +54,7 @@ const { validateCreateDonation, validateListDonationsQuery } = require('../valid
  * Create a new campaign (draft status)
  * Body: Multipart form-data with:
  *   - title: string (5-100 chars)
- *   - description: string (10-2000 chars)
+ *   - description: string (20-5000 chars)
  *   - need_type: string (required)
  *   - goals: JSON string representing campaign goals
  *   - payment_methods: JSON string with payment details
@@ -248,6 +270,87 @@ router.get(
     next();
   },
   DonationController.getCampaignDonations
+);
+
+// ============================================================================
+// MANUAL-DONATION CONFIRMATION QUEUE (CF-1 / F-1 / F-2)
+// Donations are recorded as `pending`; they only count toward public totals
+// once the creator (or an admin) confirms they received the off-platform
+// payment. Rejection reverses any applied accounting.
+// NOTE: `/donations/pending` must be registered BEFORE the generic
+// `/:campaignId/donations` list route to avoid path-matching ambiguity.
+// ============================================================================
+
+/**
+ * GET /campaigns/:campaignId/donations/pending
+ * Creator/admin confirmation queue — pending donations awaiting receipt
+ * confirmation, with proof-of-payment and "donor marked sent" status.
+ * Auth: Required (campaign creator or admin)
+ */
+router.get(
+  '/:campaignId/donations/pending',
+  authMiddleware,
+  DonationController.getPendingDonations
+);
+
+/**
+ * POST /campaigns/:campaignId/donations/:transactionId/mark-sent
+ * Donor signals they have sent the off-platform payment, optionally attaching
+ * proof of payment ({ proofUrl }). Auth: Required (the donor).
+ */
+router.post(
+  '/:campaignId/donations/:transactionId/mark-sent',
+  authMiddleware,
+  DonationController.markDonationSent
+);
+
+/**
+ * POST /campaigns/:campaignId/donations/:transactionId/proof
+ * CF-2: Donor uploads a proof-of-payment image (multipart, field name `image`).
+ * The upload middleware streams it to Cloudinary before auth runs (mirrors the
+ * campaign-create route), then the handler stores the URL and marks payment sent.
+ * Auth: Required (the donor).
+ */
+router.post(
+  '/:campaignId/donations/:transactionId/proof',
+  donationProofUpload,
+  authMiddleware,
+  DonationController.uploadDonationProof
+);
+
+/**
+ * POST /campaigns/:campaignId/donations/:transactionId/confirm
+ * Creator/admin confirms receipt → donation pending → verified (counts now).
+ * Auth: Required (campaign creator or admin)
+ */
+router.post(
+  '/:campaignId/donations/:transactionId/confirm',
+  authMiddleware,
+  DonationController.confirmDonation
+);
+
+/**
+ * POST /campaigns/:campaignId/donations/:transactionId/reject
+ * Creator/admin rejects a donation (not received / fraudulent). Reverses any
+ * accounting already applied. Body: { reason } (required).
+ * Auth: Required (campaign creator or admin)
+ */
+router.post(
+  '/:campaignId/donations/:transactionId/reject',
+  authMiddleware,
+  DonationController.rejectDonationReceipt
+);
+
+/**
+ * GET /campaigns/:campaignId/refund-requests
+ * CE-7: Creator/admin lists donor refund requests for a campaign.
+ * Query: status (requested|approved|declined, default requested), page, limit.
+ * Auth: Required (campaign creator or admin)
+ */
+router.get(
+  '/:campaignId/refund-requests',
+  authMiddleware,
+  DonationController.getCampaignRefundRequests
 );
 
 // ============================================================================
@@ -653,6 +756,13 @@ router.get('/:id/analytics', authMiddleware, CampaignController.getAnalytics);
 router.get('/:id/qr-analytics', authMiddleware, CampaignController.getQRAnalytics);
 
 /**
+ * GET /campaigns/:id/qr
+ * G-8 / CA-11: Generate (or fetch) the campaign's QR code (encodes the public
+ * campaign URL; persists qr_code_url for reuse). Public. Query: size.
+ */
+router.get('/:id/qr', CampaignController.generateQRCode);
+
+/**
  * GET /campaigns/:id/store-impressions
  * Get store-level impression data for campaign QR codes
  * Params: id (MongoDB _id or campaign_id)
@@ -672,6 +782,27 @@ router.get('/:id/store-impressions', authMiddleware, CampaignController.getStore
  * Returns: Array of { donorName, amount, date, message }
  */
 router.get('/:id/contributors', CampaignController.getContributors);
+
+/**
+ * GET /campaigns/:id/edit-history
+ * CE-1: Campaign edit history (before/after diffs). Creator or admin only.
+ * Auth: Required
+ */
+router.get('/:id/edit-history', authMiddleware, CampaignController.getEditHistory);
+
+/**
+ * PUT /campaigns/:id/journey
+ * CA-20 / G-7: Set the campaign's Transformation Journey (before/after). Creator only.
+ * Body: { entries: [{ type, image_url, caption, occurred_at }] }
+ */
+router.put('/:id/journey', authMiddleware, CampaignController.updateTransformationJourney);
+
+/**
+ * POST /campaigns/:id/journey/image
+ * G-7: Upload one journey image (multipart, field `image`). Creator only.
+ * Upload middleware runs before auth (mirrors campaign-create / proof routes).
+ */
+router.post('/:id/journey/image', journeyImageUpload, authMiddleware, CampaignController.uploadJourneyImage);
 
 /**
  * GET /campaigns/:id/activists
@@ -735,6 +866,60 @@ router.get('/:id/related', CampaignController.getRelated);
 
 /**
  * ===========================
+ * CAMPAIGN ENGAGEMENT ROUTES (meters, virality, video, donor feed, share budget)
+ * MUST COME BEFORE catch-all /:id route to avoid route matching conflicts!
+ * ===========================
+ */
+
+/**
+ * GET /campaigns/:id/meters
+ * CA-12 Multi-Meter System — unified progress meters (funds + shares + prayer + donors)
+ * Auth: Not required
+ */
+router.get('/:id/meters', CampaignEngagementController.getMeters);
+
+/**
+ * GET /campaigns/:id/virality
+ * CA-13 Crowdfunded Virality — viral coefficient & referral conversion snapshot
+ * Auth: Not required
+ */
+router.get('/:id/virality', CampaignEngagementController.getVirality);
+
+/**
+ * GET /campaigns/:id/donor-feed
+ * CA-18 Social Proof / Donor Feed — merged recent donations & shares
+ * Auth: Not required
+ */
+router.get('/:id/donor-feed', CampaignEngagementController.getDonorFeed);
+
+/**
+ * PUT /campaigns/:id/video
+ * CA-17 Campaign Video Upload/Embed — set/replace the campaign video (creator only)
+ * Body: { url, thumbnail_url?, public_id?, duration_seconds? }
+ */
+router.put('/:id/video', authMiddleware, CampaignEngagementController.setVideo);
+
+/**
+ * DELETE /campaigns/:id/video
+ * CA-17 Remove the campaign video (creator only)
+ */
+router.delete('/:id/video', authMiddleware, CampaignEngagementController.removeVideo);
+
+/**
+ * GET /campaigns/:id/share-budget
+ * CA-08 Share Budget System — read paid-sharing budget snapshot (public)
+ */
+router.get('/:id/share-budget', CampaignEngagementController.getShareBudget);
+
+/**
+ * PUT /campaigns/:id/share-budget
+ * CA-08 Share Budget System — update paid-sharing budget config (creator only)
+ * Body: { total_budget_dollars?, amount_per_share_dollars?, is_paid_sharing_active?, share_channels?, payout_consent? }
+ */
+router.put('/:id/share-budget', authMiddleware, CampaignEngagementController.updateShareBudget);
+
+/**
+ * ===========================
  * PAYOUT MANAGEMENT ROUTES (Creator sees sharers' withdrawal requests)
  * MUST COME BEFORE catch-all /:id route to avoid route matching conflicts!
  * ===========================
@@ -767,7 +952,29 @@ router.get('/:campaignId/payout-summary', authMiddleware, CampaignPayoutControll
  * Response: 200 OK confirmation
  * Auth: Required (creator only)
  */
-router.patch('/:campaignId/payouts/:withdrawalId/mark-paid', authMiddleware, CampaignPayoutController.markPayoutAsPaid);
+router.patch('/:campaignId/payouts/:withdrawalId/mark-paid', payoutProofUpload, authMiddleware, CampaignPayoutController.markPayoutAsPaid);
+
+/**
+ * GET /campaigns/creator/owed
+ * F-1: Cross-campaign "amount owed" — all this creator's pending sharer payouts,
+ * oldest first, with totals. Auth: creator.
+ * NOTE: registered under this router but mounted at /campaigns/creator/owed.
+ */
+router.get('/creator/owed', authMiddleware, CampaignPayoutController.getCreatorOwedPayouts);
+
+/**
+ * GET /campaigns/:campaignId/sharers/:sharerId/tracking
+ * Trust-based proof view: a sharer's shares/clicks/conversions and reward
+ * owed/paid for this campaign — what the creator inspects before paying. Creator only.
+ */
+router.get('/:campaignId/sharers/:sharerId/tracking', authMiddleware, CampaignPayoutController.getSharerTracking);
+
+/**
+ * POST /campaigns/:campaignId/payouts/:withdrawalId/dispute
+ * Creator disputes a payout slice they believe is fraudulent/incorrect.
+ * Body: { reason }. Creator only.
+ */
+router.post('/:campaignId/payouts/:withdrawalId/dispute', authMiddleware, CampaignPayoutController.disputePayout);
 
 /**
  * GET /campaigns/:id
@@ -946,5 +1153,24 @@ router.get('/:id/share-leaderboard', CampaignController.getCampaignShareLeaderbo
 // - DELETE /campaigns/:id/updates/:updateId
 // - POST /campaigns/:id/updates/:updateId/engagement
 router.use('/:id/updates', campaignUpdateRoutes);
+
+// ============================================================================
+// CAMPAIGN COMMENTS & ENCOURAGEMENT (CA-15)
+// - POST/GET   /campaigns/:id/comments
+// - GET        /campaigns/:id/comments/:commentId/replies
+// - PATCH/DELETE /campaigns/:id/comments/:commentId
+// - POST       /campaigns/:id/comments/:commentId/like
+// - POST       /campaigns/:id/comments/:commentId/report
+// ============================================================================
+router.use('/:id/comments', campaignCommentRoutes);
+
+// ============================================================================
+// CAMPAIGN MILESTONE CELEBRATIONS (CA-19)
+// - GET    /campaigns/:id/milestones
+// - POST   /campaigns/:id/milestones        (custom, creator only)
+// - POST   /campaigns/:id/milestones/check  (recompute auto-milestones)
+// - DELETE /campaigns/:id/milestones/:milestoneId
+// ============================================================================
+router.use('/:id/milestones', campaignMilestoneRoutes);
 
 module.exports = router;

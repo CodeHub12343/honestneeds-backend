@@ -17,7 +17,20 @@ const express = require('express');
 const router = express.Router();
 const { authMiddleware } = require('../middleware/authMiddleware');
 const ActivityFeedService = require('../services/ActivityFeedService');
+const NotificationPreferences = require('../models/NotificationPreferences');
 const winstonLogger = require('../utils/winstonLogger');
+
+// Top-level keys on the NotificationPreferences document that callers may patch.
+const PREF_KEYS = [
+  'notifications_enabled',
+  'channels',
+  'prayer_notifications',
+  'campaign_notifications',
+  'marketing',
+  'do_not_disturb',
+  'frequency_limits',
+  'privacy',
+];
 
 /**
  * GET /api/notifications/preferences
@@ -35,31 +48,12 @@ router.get('/preferences', authMiddleware, async (req, res) => {
       });
     }
 
-    // Default preferences - in production, fetch from database
-    const preferences = {
-      notificationsEnabled: true,
-      soundEnabled: true,
-      browserNotificationsEnabled: false,
-      emailNotificationsEnabled: true,
-      pushNotificationsEnabled: false,
-      notificationTypes: {
-        campaignActivated: true,
-        donationReceived: true,
-        goalReached: true,
-        milestoneAchieved: true,
-        commentReceived: true,
-        shares: true,
-      },
-      quietHours: {
-        enabled: false,
-        startTime: '22:00',
-        endTime: '08:00',
-      },
-      soundSettings: {
-        volume: 0.8,
-        soundType: 'bell', // bell, chime, ding, notify
-      },
-    };
+    // Load (or lazily create) the persisted preferences document.
+    let preferences = await NotificationPreferences.findOne({ user_id: userId }).lean();
+    if (!preferences) {
+      const created = await NotificationPreferences.create({ user_id: userId });
+      preferences = created.toObject();
+    }
 
     res.status(200).json({
       success: true,
@@ -96,31 +90,37 @@ router.post('/preferences', authMiddleware, async (req, res) => {
       });
     }
 
-    const { preferences } = req.body;
+    // Accept either { preferences: {...} } or a flat body of preference keys.
+    const incoming = req.body?.preferences || req.body || {};
 
-    if (!preferences) {
+    // Whitelist only known top-level keys to avoid clobbering user_id/timestamps.
+    const update = {};
+    PREF_KEYS.forEach((key) => {
+      if (incoming[key] !== undefined) update[key] = incoming[key];
+    });
+
+    if (Object.keys(update).length === 0) {
       return res.status(400).json({
         success: false,
-        message: 'preferences is required',
+        message: 'No valid preference fields provided',
       });
     }
 
-    // In production, save to database
-    // await UserNotificationPreference.findOneAndUpdate(
-    //   { userId },
-    //   { preferences },
-    //   { upsert: true, new: true }
-    // );
+    const saved = await NotificationPreferences.findOneAndUpdate(
+      { user_id: userId },
+      { $set: update },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    ).lean();
 
     winstonLogger.info('📝 Notification preferences updated', {
       userId,
-      preferences,
+      keys: Object.keys(update),
     });
 
     res.status(200).json({
       success: true,
       message: 'Preferences updated successfully',
-      data: preferences,
+      data: saved,
     });
   } catch (error) {
     winstonLogger.error('❌ Error updating notification preferences', {
@@ -157,7 +157,8 @@ router.get('/activity', authMiddleware, async (req, res) => {
     const activities = await ActivityFeedService.getRecentActivity(
       userId,
       parseInt(limit),
-      parseInt(offset)
+      parseInt(offset),
+      filter
     );
 
     const unreadCount = await ActivityFeedService.getUnreadCount(userId);

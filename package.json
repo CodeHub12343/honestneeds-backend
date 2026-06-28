@@ -41,6 +41,8 @@
     "test:ci": "jest --ci --coverage --maxWorkers=2 --detectOpenHandles"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.104.2",
+    "@google/genai": "^2.9.0",
     "axios": "^1.14.0",
     "bcryptjs": "^2.4.3",
     "cloudinary": "^1.41.3",

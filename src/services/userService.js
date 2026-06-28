@@ -31,7 +31,7 @@ const register = async (userData) => {
       throw error;
     }
 
-    const { email, password, displayName } = validation.data;
+    const { email, password, displayName, firstName, lastName, username } = validation.data;
 
     // Check if user already exists
     const existingUser = await User.findOne({
@@ -48,14 +48,33 @@ const register = async (userData) => {
       throw error;
     }
 
+    // If a username was supplied, ensure it's available before creating.
+    if (username) {
+      const available = await User.isUsernameAvailable(username);
+      if (!available) {
+        const error = new Error('That username is already taken');
+        error.statusCode = 409;
+        error.code = 'USERNAME_EXISTS';
+        throw error;
+      }
+    }
+
     // Create new user
     const newUser = new User({
       email,
       password_hash: password, // Will be hashed in pre-save hook
       display_name: displayName,
+      first_name: firstName || null,
+      last_name: lastName || null,
+      username: username || null,
       role: 'creator', // Default role - users can create campaigns by default
       verified: true, // Temporarily disabled email verification - set to true for immediate access
     });
+
+    // Email is auto-verified today (see `verified` above) → reflect in the
+    // trust badge so the profile completion meter is accurate from day one.
+    newUser.verification_badges.email_verified = true;
+    newUser.recomputeProfileCompletion();
 
     // Save user (password will be hashed automatically)
     await newUser.save();
@@ -65,11 +84,10 @@ const register = async (userData) => {
       email,
     });
 
-    // Generate tokens
+    // Generate tokens (access token lifetime comes from JWT_EXPIRY env default)
     const accessToken = generateToken(
       newUser._id.toString(),
-      [newUser.role],
-      '24h'
+      [newUser.role]
     );
 
     const refreshToken = generateRefreshToken(newUser._id.toString());
@@ -81,8 +99,12 @@ const register = async (userData) => {
         id: newUser._id,
         email: newUser.email,
         displayName: newUser.display_name,
+        username: newUser.username,
+        firstName: newUser.first_name,
+        lastName: newUser.last_name,
         role: newUser.role,
         verified: newUser.verified,
+        profileCompletion: newUser.profile_completion,
         createdAt: newUser.created_at,
       },
       accessToken,
@@ -154,16 +176,20 @@ const login = async (credentials) => {
     // Update last login
     await user.updateLastLogin();
 
+    // Best-effort daily-login XP (idempotent per day; never blocks login).
+    require('./GamificationService')
+      .awardDailyLogin(user._id)
+      .catch(() => {});
+
     logger.info('User logged in successfully', {
       userId: user._id,
       email,
     });
 
-    // Generate tokens
+    // Generate tokens (access token lifetime comes from JWT_EXPIRY env default)
     const accessToken = generateToken(
       user._id.toString(),
-      [user.role],
-      '24h'
+      [user.role]
     );
 
     const refreshToken = generateRefreshToken(user._id.toString());

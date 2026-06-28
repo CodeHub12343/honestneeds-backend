@@ -18,6 +18,7 @@
 const PaymentMethod = require('../models/PaymentMethod');
 const User = require('../models/User');
 const { winstonLogger } = require('../utils/logger');
+const { encryptField } = require('../utils/fieldEncryption');
 const Stripe = require('stripe');
 
 if (!process.env.STRIPE_API_KEY) {
@@ -281,9 +282,12 @@ class PaymentMethodController {
           bank_name: bank_account.bank_name || null,
           bank_account_type: bank_account.account_type || null,
           bank_account_last_four: accountLast4,
-          bank_account_number: bank_account.account_number || null, // Store full number
+          // C-3: full account/routing numbers are encrypted at rest (AES-256-GCM,
+          // enc:v1:… envelope). Last-four stays plaintext for display. Decrypted
+          // only on the owning creator's payout views, with an audit trail.
+          bank_account_number: bank_account.account_number ? encryptField(bank_account.account_number) : null,
           bank_routing_number_last_four: routingLast4,
-          bank_routing_number: bank_account.routing_number || null, // Store full routing
+          bank_routing_number: bank_account.routing_number ? encryptField(bank_account.routing_number) : null,
           status: 'pending_verification',
           verification_method: 'micro_deposits',
           verification_status: 'unverified',

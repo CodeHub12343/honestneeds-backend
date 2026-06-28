@@ -5,11 +5,22 @@
  * Checks multiple patterns and indicators to identify fraudulent activity
  */
 
+const mongoose = require('mongoose');
 const Transaction = require('../models/Transaction');
 const { ShareRecord } = require('../models/Share');
 const User = require('../models/User');
 const Campaign = require('../models/Campaign');
 const winstonLogger = require('../utils/winstonLogger');
+
+// SE-5 sharer-fraud dashboard thresholds (admin tooling extends the per-tx
+// 24h / 10× checks into aggregate signals).
+const SHARER_FRAUD = {
+  VELOCITY_DAYS: 7,
+  VELOCITY_FLAG_COUNT: 10, // ≥ this many rewards in the window → high velocity
+  CLUSTER_MIN_ACCOUNTS: 3, // ≥ this many distinct accounts on one IP/device → cluster
+  REJECTION_FLAG_COUNT: 2, // ≥ this many rejected rewards → rejection anomaly
+  LIMIT: 20,
+};
 
 class ShareFraudDetectionService {
   /**
@@ -442,6 +453,222 @@ class ShareFraudDetectionService {
       });
       throw error;
     }
+  }
+
+  /**
+   * SE-5: Sharer fraud dashboard (admin). Aggregates the share-reward fraud
+   * signals — summary, velocity, IP/device clusters, and rejection anomalies —
+   * into a single payload for admin tooling.
+   *
+   * @param {Object} [opts] - { velocityDays, limit }
+   * @returns {Promise<Object>}
+   */
+  static async getSharerFraudDashboard(opts = {}) {
+    const velocityDays = opts.velocityDays || SHARER_FRAUD.VELOCITY_DAYS;
+    const limit = Math.min(opts.limit || SHARER_FRAUD.LIMIT, 100);
+    const windowStart = new Date(Date.now() - velocityDays * 24 * 60 * 60 * 1000);
+
+    const REWARD = { transaction_type: 'share_reward' };
+
+    const [summaryAgg, velocity, ipClusters, deviceClusters, rejectionAnomalies] = await Promise.all([
+      // ── Summary ──
+      Transaction.aggregate([
+        { $match: REWARD },
+        {
+          $group: {
+            _id: null,
+            total_rewards: { $sum: 1 },
+            approved: { $sum: { $cond: [{ $eq: ['$status', 'approved'] }, 1, 0] } },
+            rejected: { $sum: { $cond: [{ $eq: ['$status', 'rejected'] }, 1, 0] } },
+            pending_hold: { $sum: { $cond: [{ $eq: ['$status', 'pending_hold'] }, 1, 0] } },
+            total_amount_cents: { $sum: '$amount_cents' },
+            rejected_amount_cents: { $sum: { $cond: [{ $eq: ['$status', 'rejected'] }, '$amount_cents', 0] } },
+          },
+        },
+      ]),
+
+      // ── Velocity: top earners in the window ──
+      Transaction.aggregate([
+        { $match: { ...REWARD, created_at: { $gte: windowStart } } },
+        {
+          $group: {
+            _id: '$supporter_id',
+            reward_count: { $sum: 1 },
+            total_cents: { $sum: '$amount_cents' },
+            rejected: { $sum: { $cond: [{ $eq: ['$status', 'rejected'] }, 1, 0] } },
+            last_at: { $max: '$created_at' },
+            ips: { $addToSet: '$ip_address' },
+          },
+        },
+        { $sort: { reward_count: -1 } },
+        { $limit: limit },
+        { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'u' } },
+        {
+          $project: {
+            supporter_id: '$_id',
+            reward_count: 1,
+            total_dollars: { $round: [{ $divide: ['$total_cents', 100] }, 2] },
+            rejected: 1,
+            distinct_ips: { $size: { $filter: { input: '$ips', cond: { $ne: ['$$this', null] } } } },
+            last_at: 1,
+            name: { $ifNull: [{ $arrayElemAt: ['$u.display_name', 0] }, { $arrayElemAt: ['$u.email', 0] }] },
+            email: { $arrayElemAt: ['$u.email', 0] },
+            flagged: { $gte: ['$reward_count', SHARER_FRAUD.VELOCITY_FLAG_COUNT] },
+          },
+        },
+      ]),
+
+      // ── IP clusters: one IP, many distinct sharer accounts ──
+      Transaction.aggregate([
+        { $match: { ...REWARD, ip_address: { $ne: null } } },
+        { $group: { _id: '$ip_address', accounts: { $addToSet: '$supporter_id' }, reward_count: { $sum: 1 } } },
+        { $project: { ip: '$_id', unique_accounts: { $size: '$accounts' }, reward_count: 1, _id: 0 } },
+        { $match: { unique_accounts: { $gte: SHARER_FRAUD.CLUSTER_MIN_ACCOUNTS } } },
+        { $sort: { unique_accounts: -1 } },
+        { $limit: limit },
+      ]),
+
+      // ── Device clusters: one device fingerprint, many accounts (from ShareRecord) ──
+      ShareRecord.aggregate([
+        { $match: { device_info: { $ne: null } } },
+        { $group: { _id: '$device_info', accounts: { $addToSet: '$supporter_id' }, share_count: { $sum: 1 } } },
+        { $project: { device: '$_id', unique_accounts: { $size: '$accounts' }, share_count: 1, _id: 0 } },
+        { $match: { unique_accounts: { $gte: SHARER_FRAUD.CLUSTER_MIN_ACCOUNTS } } },
+        { $sort: { unique_accounts: -1 } },
+        { $limit: limit },
+      ]),
+
+      // ── Rejection anomalies: sharers with repeated rejected rewards ──
+      Transaction.aggregate([
+        { $match: REWARD },
+        {
+          $group: {
+            _id: '$supporter_id',
+            total: { $sum: 1 },
+            rejected: { $sum: { $cond: [{ $eq: ['$status', 'rejected'] }, 1, 0] } },
+          },
+        },
+        { $match: { rejected: { $gte: SHARER_FRAUD.REJECTION_FLAG_COUNT } } },
+        { $sort: { rejected: -1 } },
+        { $limit: limit },
+        { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'u' } },
+        {
+          $project: {
+            supporter_id: '$_id',
+            total: 1,
+            rejected: 1,
+            rejection_rate: { $round: [{ $multiply: [{ $divide: ['$rejected', '$total'] }, 100] }, 1] },
+            name: { $ifNull: [{ $arrayElemAt: ['$u.display_name', 0] }, { $arrayElemAt: ['$u.email', 0] }] },
+            email: { $arrayElemAt: ['$u.email', 0] },
+          },
+        },
+      ]),
+    ]);
+
+    const s = summaryAgg[0] || {};
+    const total = s.total_rewards || 0;
+    return {
+      summary: {
+        total_rewards: total,
+        approved: s.approved || 0,
+        rejected: s.rejected || 0,
+        pending_hold: s.pending_hold || 0,
+        total_amount_dollars: ((s.total_amount_cents || 0) / 100).toFixed(2),
+        rejected_amount_dollars: ((s.rejected_amount_cents || 0) / 100).toFixed(2),
+        fraud_rate_percent: total > 0 ? (((s.rejected || 0) / total) * 100).toFixed(1) : '0.0',
+      },
+      thresholds: {
+        velocity_days: velocityDays,
+        velocity_flag_count: SHARER_FRAUD.VELOCITY_FLAG_COUNT,
+        cluster_min_accounts: SHARER_FRAUD.CLUSTER_MIN_ACCOUNTS,
+        rejection_flag_count: SHARER_FRAUD.REJECTION_FLAG_COUNT,
+      },
+      velocity,
+      ip_clusters: ipClusters,
+      device_clusters: deviceClusters,
+      rejection_anomalies: rejectionAnomalies,
+    };
+  }
+
+  /**
+   * SE-5: Per-sharer drill-down for the fraud dashboard.
+   * @param {string} userId
+   * @returns {Promise<Object>}
+   */
+  static async getSharerProfile(userId) {
+    const supporterId = new mongoose.Types.ObjectId(userId);
+
+    const [user, rewardAgg, shareAgg, donationCount, recentRewards] = await Promise.all([
+      User.findById(supporterId).select('email display_name created_at').lean(),
+      Transaction.aggregate([
+        { $match: { supporter_id: supporterId, transaction_type: 'share_reward' } },
+        {
+          $group: {
+            _id: null,
+            total: { $sum: 1 },
+            approved: { $sum: { $cond: [{ $eq: ['$status', 'approved'] }, 1, 0] } },
+            rejected: { $sum: { $cond: [{ $eq: ['$status', 'rejected'] }, 1, 0] } },
+            pending_hold: { $sum: { $cond: [{ $eq: ['$status', 'pending_hold'] }, 1, 0] } },
+            total_cents: { $sum: '$amount_cents' },
+            ips: { $addToSet: '$ip_address' },
+          },
+        },
+      ]),
+      ShareRecord.aggregate([
+        { $match: { supporter_id: supporterId } },
+        { $group: { _id: null, shares: { $sum: 1 }, devices: { $addToSet: '$device_info' }, ips: { $addToSet: '$ip_address' } } },
+      ]),
+      Transaction.countDocuments({ supporter_id: supporterId, transaction_type: 'donation' }),
+      Transaction.find({ supporter_id: supporterId, transaction_type: 'share_reward' })
+        .sort({ created_at: -1 })
+        .limit(20)
+        .select('transaction_id amount_cents status ip_address created_at')
+        .lean(),
+    ]);
+
+    if (!user) {
+      const e = new Error('USER_NOT_FOUND: Sharer not found');
+      e.statusCode = 404;
+      throw e;
+    }
+
+    const r = rewardAgg[0] || {};
+    const sh = shareAgg[0] || {};
+    const accountAgeDays = user.created_at
+      ? ((Date.now() - new Date(user.created_at).getTime()) / (1000 * 60 * 60 * 24)).toFixed(1)
+      : null;
+
+    return {
+      sharer: {
+        id: user._id,
+        name: user.display_name || user.email,
+        email: user.email,
+        account_age_days: accountAgeDays,
+      },
+      rewards: {
+        total: r.total || 0,
+        approved: r.approved || 0,
+        rejected: r.rejected || 0,
+        pending_hold: r.pending_hold || 0,
+        total_dollars: ((r.total_cents || 0) / 100).toFixed(2),
+        distinct_ips: (r.ips || []).filter(Boolean).length,
+      },
+      shares: {
+        total: sh.shares || 0,
+        distinct_devices: (sh.devices || []).filter(Boolean).length,
+        distinct_ips: (sh.ips || []).filter(Boolean).length,
+      },
+      // Pure-affiliate signal: earns from shares but never donates.
+      donation_count: donationCount,
+      pure_affiliate: donationCount === 0 && (r.total || 0) > 0,
+      recent_rewards: recentRewards.map((t) => ({
+        transaction_id: t.transaction_id,
+        amount_dollars: (t.amount_cents / 100).toFixed(2),
+        status: t.status,
+        ip_address: t.ip_address || null,
+        created_at: t.created_at,
+      })),
+    };
   }
 }
 

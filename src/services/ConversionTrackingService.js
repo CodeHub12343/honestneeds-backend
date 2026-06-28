@@ -251,9 +251,10 @@ class ConversionTrackingService {
       let rewardApplied = false;
       let rewardAmount = 0;
 
+      // SR-1: gated on the paid-sharing FLAG, not campaign_type — any campaign
+      // with paid sharing active can pay a conversion bonus.
       if (
         conversionValue > 0 &&
-        campaign.campaign_type === 'sharing' &&
         campaign.share_config?.is_paid_sharing_active
       ) {
         // Check if campaign has conversion bonus configured

@@ -157,11 +157,14 @@ class StripeWebhookHandler {
         amount: tierData.price_cents,
       });
 
-      // Update campaign with boost tier and active status
+      // Update campaign with boost tier and active status.
+      // Only paid boosts reach this webhook (free is activated inline without
+      // Stripe), so this always represents a ranking-affecting boost.
       await Campaign.findByIdAndUpdate(campaign_id, {
         last_boost_date: new Date(),
         current_boost_tier: tier,
         is_boosted: true,
+        boost_weight: tierData.visibility_weight,
       });
 
       winstonLogger.info('Campaign updated with boost activation', {

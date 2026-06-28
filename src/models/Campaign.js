@@ -35,7 +35,7 @@ const campaignSchema = new mongoose.Schema(
     description: {
       type: String,
       required: [true, 'Description is required'],
-      maxlength: 2000,
+      maxlength: 5000,
       trim: true,
     },
 
@@ -148,6 +148,47 @@ const campaignSchema = new mongoose.Schema(
       },
     },
 
+    // CA-14: Geographic Scope (reach of the campaign)
+    geographic_scope: {
+      type: String,
+      enum: ['local', 'national', 'global'],
+      default: 'national',
+      index: true,
+    },
+
+    // CA-17: Campaign Video Upload / Embed
+    video: {
+      // Direct video file (uploaded to Cloudinary) or external provider embed
+      url: {
+        type: String,
+        maxlength: 1000,
+      },
+      provider: {
+        type: String,
+        enum: ['youtube', 'vimeo', 'cloudinary', 'other'],
+      },
+      // Normalized embeddable URL (e.g. https://www.youtube.com/embed/<id>)
+      embed_url: {
+        type: String,
+        maxlength: 1000,
+      },
+      thumbnail_url: {
+        type: String,
+        maxlength: 1000,
+      },
+      public_id: {
+        type: String,
+        maxlength: 300,
+      },
+      duration_seconds: {
+        type: Number,
+        min: 0,
+      },
+      added_at: {
+        type: Date,
+      },
+    },
+
     // Payment methods (plain text - stored as entered by creator)
     payment_methods: [
       {
@@ -188,6 +229,34 @@ const campaignSchema = new mongoose.Schema(
       default: 'fundraising',
       required: true,
       index: true,
+    },
+
+    // ── Admin moderation (AD-02) ───────────────────────────────────────
+    // Independent of `status` (the creator-facing lifecycle). `status`
+    // controls visibility/activation; `moderation.review_status` records the
+    // trust & safety verdict. A campaign can be active but flagged, etc.
+    moderation: {
+      review_status: {
+        type: String,
+        enum: ['pending', 'approved', 'rejected', 'flagged', 'escalated'],
+        default: 'pending',
+        index: true,
+      },
+      reviewed_by: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        default: null,
+      },
+      reviewed_at: { type: Date, default: null },
+      review_notes: { type: String, default: null },
+      rejection_reason: { type: String, default: null },
+      // Reason the campaign entered the queue / was flagged.
+      flag_reason: { type: String, default: null },
+      flagged_at: { type: Date, default: null },
+      // Number of times this campaign has been reported by users.
+      report_count: { type: Number, default: 0 },
+      // AI risk score snapshot (0-100) if a fraud assessment exists.
+      risk_score: { type: Number, default: null },
     },
 
     // Campaign timing
@@ -323,6 +392,22 @@ const campaignSchema = new mongoose.Schema(
         default: 0,
         min: 0,
       },
+      // ── Manual-donation verification (F-1 / CF-1) ──────────────────────
+      // Donations are recorded as `pending` and only counted toward the
+      // verified totals above once the creator/admin confirms receipt.
+      // These two fields track the not-yet-confirmed pipeline so creators
+      // can see "awaiting confirmation" volume without it inflating public
+      // meters or goal progress.
+      pending_donations: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      pending_donation_amount: {
+        type: Number, // in cents
+        default: 0,
+        min: 0,
+      },
       total_volunteers: {
         type: Number,
         default: 0,
@@ -370,14 +455,78 @@ const campaignSchema = new mongoose.Schema(
     },
 
     // Share Configuration (for paid sharing rewards)
+    //
+    // TRUST-BASED MODEL (Phase A — 2026-06-22): HonestNeed no longer escrows
+    // sharer rewards. The creator declares a reward budget in the campaign
+    // wizard, paid sharing activates immediately, and the creator settles each
+    // sharer DIRECTLY (off-platform) when they request a payout. The platform
+    // only tracks who earned what and who has been paid. So:
+    //   - total_budget               = creator's declared reward pool (cents)
+    //   - committed_budget_remaining = liability counter: declared pool minus
+    //                                  rewards already accrued (decremented as
+    //                                  conversions create owed rewards). Paid
+    //                                  sharing auto-pauses when it can't cover
+    //                                  one more reward.
+    //   - committed_total            = cumulative rewards accrued to date (cents)
+    //   - is_paid_sharing_active      = true as soon as a reward + budget are set
+    //   - creator_payout_consent_at   = when the creator accepted the
+    //                                   pay-sharers-directly agreement
+    //
+    // LEGACY (escrow) fields — retained for back-compat / migration only:
+    //   - total_budget_allocated, current_budget_remaining
     share_config: {
       total_budget: {
+        type: Number, // in cents — creator's declared reward pool
+        default: 0,
+        min: 0,
+      },
+      // Liability counter: declared pool minus rewards already accrued.
+      committed_budget_remaining: {
         type: Number, // in cents
         default: 0,
         min: 0,
       },
+      // Cumulative rewards accrued (owed + paid) over the campaign's life.
+      committed_total: {
+        type: Number, // in cents
+        default: 0,
+        min: 0,
+      },
+      // Creator's acceptance of the "I will pay sharers directly" agreement.
+      creator_payout_consent_at: {
+        type: Date,
+        default: null,
+      },
+      // LEGACY (escrow): cumulative funded gross from verified reloads.
+      total_budget_allocated: {
+        type: Number, // in cents
+        default: 0,
+        min: 0,
+      },
+      // LEGACY (escrow): funded & spendable balance (reload-backed).
       current_budget_remaining: {
         type: Number, // in cents
+        default: 0,
+        min: 0,
+      },
+      // Lifetime reward accounting (written by ProcessShareHolds / reload flow).
+      total_rewards_paid: {
+        type: Number, // in cents
+        default: 0,
+        min: 0,
+      },
+      total_approved_rewards: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      total_rejected_rewards: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      total_fraud_cases: {
+        type: Number,
         default: 0,
         min: 0,
       },
@@ -497,6 +646,16 @@ const campaignSchema = new mongoose.Schema(
       },
     },
 
+    // RG-19 Miracle Mode — emergency rallying state for urgent campaigns.
+    // When active, the campaign is surfaced/boosted and shares carry extra XP.
+    miracle_mode: {
+      active: { type: Boolean, default: false, index: true },
+      reason: { type: String, maxlength: 500, default: null },
+      activated_at: { type: Date, default: null },
+      activated_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+      expires_at: { type: Date, default: null },
+    },
+
     // QR code
     qr_code_url: {
       type: String,
@@ -539,6 +698,20 @@ const campaignSchema = new mongoose.Schema(
       maxlength: 10,
     },
 
+    // U-8: tax-deductibility. Most peer-to-peer manual donations are NOT
+    // tax-deductible, so this defaults to false. It may only be set true for a
+    // verified tax-exempt recipient (e.g. a 501(c)(3)); `tax_id` is the EIN/
+    // registration shown on receipts when deductible.
+    tax_deductible: {
+      type: Boolean,
+      default: false,
+    },
+    tax_id: {
+      type: String,
+      maxlength: 50,
+      default: null,
+    },
+
     // Boost tracking (for campaign visibility enhancement)
     last_boost_date: {
       type: Date,
@@ -552,8 +725,69 @@ const campaignSchema = new mongoose.Schema(
     },
     current_boost_tier: {
       type: String,
-      enum: ['free', 'basic', 'pro', 'premium'],
+      enum: ['free', 'pro'],
       default: 'free',
+    },
+    // Numeric ranking weight for the campaign's current active paid boost.
+    // 0 = not boosted (default), otherwise the boost's visibility multiplier
+    // (e.g. 10 for pro). Used for robust listing sort instead of relying on
+    // alphabetical tier ordering. Only paid boosts set this above 0.
+    boost_weight: {
+      type: Number,
+      default: 0,
+      index: true,
+    },
+
+    // CA-19: Milestone celebrations — percentages already celebrated (avoid duplicates)
+    milestones_celebrated: {
+      type: [Number],
+      default: [],
+    },
+
+    // CA-20 / G-7: Transformation Journey — before/after storytelling. An ordered
+    // list of journey entries the creator curates to show the campaign's impact.
+    transformation_journey: [
+      {
+        type: {
+          type: String,
+          enum: ['before', 'after', 'milestone'],
+          required: true,
+        },
+        image_url: { type: String, maxlength: 1000 },
+        caption: { type: String, maxlength: 500 },
+        occurred_at: { type: Date, default: () => new Date() },
+      },
+    ],
+
+    // CA-13: Crowdfunded Virality metrics (denormalized for fast reads)
+    virality: {
+      // Total referral link clicks attributed to this campaign
+      referral_clicks: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      // Conversions (donation/share) that originated from a referral
+      referral_conversions: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      // Number of distinct people who re-shared after arriving via a share
+      secondary_sharers: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      // Cached viral coefficient (avg new sharers generated per sharer)
+      viral_coefficient: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      last_calculated_at: {
+        type: Date,
+      },
     },
 
     // Soft delete
@@ -591,6 +825,8 @@ campaignSchema.index({ creator_id: 1, created_at: -1 });
 campaignSchema.index({ need_type: 1, status: 1 });
 campaignSchema.index({ status: 1, published_at: -1 });
 campaignSchema.index({ is_deleted: 1 });
+campaignSchema.index({ 'moderation.review_status': 1, created_at: -1 }); // AD-02 queue
+campaignSchema.index({ 'moderation.report_count': -1 });
 
 // Middleware to update updated_at before save
 campaignSchema.pre('save', function (next) {
@@ -613,6 +849,16 @@ campaignSchema.statics.findActive = function (query = {}) {
 // Static method to find by campaign_id
 campaignSchema.statics.findByCampaignId = function (campaign_id) {
   return this.findOne({ campaign_id, is_deleted: false });
+};
+
+// Resolve a campaign by Mongo _id (when given a valid ObjectId) or by the
+// public campaign_id (e.g. "CAMP-2026-460-172AB8"). Guards against the
+// CastError that findById throws when a non-ObjectId string is passed.
+campaignSchema.statics.findByIdOrCampaignId = function (identifier) {
+  if (identifier && mongoose.Types.ObjectId.isValid(identifier)) {
+    return this.findById(identifier);
+  }
+  return this.findByCampaignId(identifier);
 };
 
 // Instance method to check if user owns this campaign

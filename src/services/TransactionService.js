@@ -11,12 +11,14 @@ const Campaign = require('../models/Campaign');
 const User = require('../models/User');
 const ShareRewardService = require('./ShareRewardService');
 const SweepstakesService = require('./SweepstakesService');
+const feeEngine = require('../utils/feeEngine');
 const winstonLogger = require('../utils/winstonLogger');
 
 class TransactionService extends EventEmitter {
   constructor() {
     super();
-    this.platformFeePercent = 0.2; // 20%
+    // F-9 / R-4: single source of truth for the donation fee rate.
+    this.platformFeePercent = feeEngine.DONATION_FEE_RATE;
   }
 
   /**
@@ -95,6 +97,16 @@ class TransactionService extends EventEmitter {
       if (campaign.status !== 'active') {
         throw new Error(`CAMPAIGN_NOT_ACTIVE: Campaign is ${campaign.status}, cannot accept donations`);
       }
+      // CF-5: enforce end_date at the donation chokepoint. The daily expiry
+      // worker flips status to 'completed', but between expiry and the next run
+      // a campaign would otherwise still accept donations — block them here.
+      if (campaign.end_date && new Date(campaign.end_date).getTime() <= Date.now()) {
+        throw new Error('CAMPAIGN_EXPIRED: Campaign has ended and can no longer accept donations');
+      }
+      // CF-6: never accept money for a campaign that trust & safety rejected.
+      if (campaign.moderation && campaign.moderation.review_status === 'rejected') {
+        throw new Error('CAMPAIGN_NOT_AVAILABLE: Campaign is not available for donations');
+      }
 
       // Supporter validation
       const supporter = await User.findById(supporterId).session(session);
@@ -115,10 +127,10 @@ class TransactionService extends EventEmitter {
 
       // ===== CALCULATIONS =====
 
-      // Convert dollars to cents and calculate fees
+      // Convert dollars to cents and calculate fees via the canonical engine.
       const amountCents = Math.round(amountDollars * 100);
-      const platformFeeCents = Math.round(amountCents * this.platformFeePercent);
-      const netAmountCents = amountCents - platformFeeCents;
+      const { feeCents: platformFeeCents, netCents: netAmountCents } =
+        feeEngine.calculateDonationFee(amountCents);
 
       // ===== DATABASE WRITE (ATOMIC TRANSACTION) =====
 
@@ -134,193 +146,63 @@ class TransactionService extends EventEmitter {
         platform_fee_cents: platformFeeCents,
         net_amount_cents: netAmountCents,
         payment_method: paymentMethod,
-        status: 'verified', // Automatically verified
+        // F-1: Manual donations are NOT auto-verified. The platform never sees
+        // the money (it moves donor → creator off-platform), so a donation only
+        // becomes `verified` once the creator/admin confirms receipt. Until then
+        // it must not count toward goal progress or public meters.
+        status: 'pending',
         proof_url: options.proofUrl,
+        // Persist the referral code so share-to-Earn conversion can be processed
+        // at verification time (never for an unconfirmed donation).
+        referral_code: options.referralCode || null,
         ip_address: options.ipAddress,
         user_agent: options.userAgent,
         idempotency_key: idempotencyKey,
       };
 
-      // ✅ NEW: Create transaction within MongoDB session
+      // ✅ Create transaction within MongoDB session
       const transaction = new Transaction(transactionData);
       await transaction.save({ session });
 
-      // ✅ NEW: Update campaign metrics within same transaction
-      // Build dynamic update object for donations_by_method
-      const incUpdate = {
-        'metrics.total_donations': 1,
-        'metrics.total_donation_amount': amountCents,
-      };
-      const donationMethodKey = `metrics.donations_by_method.${paymentMethod}`;
-      incUpdate[donationMethodKey] = 1;
-
-      const updatedCampaign = await Campaign.findByIdAndUpdate(
+      // ===== PENDING-PIPELINE ACCOUNTING (NOT counted publicly) =====
+      // Only track the "awaiting confirmation" pipeline. Verified totals,
+      // unique supporters, donations_by_method, and goal current_amount are all
+      // applied later in verifyTransaction() once receipt is confirmed.
+      const pendingUpdate = await Campaign.findByIdAndUpdate(
         campaignId,
         {
-          $inc: incUpdate,
-          $addToSet: {
-            'metrics.unique_supporters': supporterId,
+          $inc: {
+            'metrics.pending_donations': 1,
+            'metrics.pending_donation_amount': amountCents,
           },
-        },
-        { new: true, session } // ✅ NEW: Add session parameter for atomic operations
-      );
-
-      if (!updatedCampaign) {
-        // ✅ NEW: Rollback happens automatically - no manual deletion needed
-        throw new Error('CAMPAIGN_UPDATE_FAILED: Failed to update campaign metrics');
-      }
-
-      // ===== UPDATE TOP-LEVEL CAMPAIGN FIELDS =====
-      // Calculate top-level aggregates based on updated metrics
-      const totalDonations = updatedCampaign.metrics.total_donations || 0;
-      const totalDonationAmount = updatedCampaign.metrics.total_donation_amount || 0;
-      const uniqueDonors = updatedCampaign.metrics.unique_supporters?.length || 0;
-      const avgDonation = totalDonations > 0 ? Math.round(totalDonationAmount / totalDonations) : 0;
-
-      // Use another update to set top-level aggregates
-      const topLevelUpdate = await Campaign.findByIdAndUpdate(
-        campaignId,
-        {
-          total_donors: uniqueDonors,
-          average_donation: avgDonation,
-          total_donations: totalDonationAmount,
         },
         { new: true, session }
       );
 
-      if (!topLevelUpdate) {
-        throw new Error('CAMPAIGN_TOP_LEVEL_UPDATE_FAILED: Failed to update campaign top-level fields');
+      if (!pendingUpdate) {
+        // Rollback happens automatically
+        throw new Error('CAMPAIGN_UPDATE_FAILED: Failed to update campaign pending metrics');
       }
 
-      winstonLogger.info('📊 Campaign donation metrics updated', {
+      winstonLogger.info('📊 Campaign pending-donation recorded (awaiting confirmation)', {
         campaignId,
-        metrics: {
-          total_donations: totalDonations,
-          total_donation_amount: totalDonationAmount / 100,
-          unique_donors: uniqueDonors,
-          average_donation: avgDonation / 100,
-          payment_method: paymentMethod,
-        }
+        transactionId: transaction.transaction_id,
+        amount_dollars: amountCents / 100,
+        pending_donations: pendingUpdate.metrics.pending_donations,
+        pending_donation_amount: (pendingUpdate.metrics.pending_donation_amount || 0) / 100,
       });
 
-      // ===== UPDATE CAMPAIGN GOALS =====
-      try {
-        const goalUpdateResult = await Campaign.findByIdAndUpdate(
-          campaignId,
-          [
-            {
-              $set: {
-                goals: {
-                  $map: {
-                    input: '$goals',
-                    as: 'goal',
-                    in: {
-                      $cond: [
-                        { $eq: ['$$goal.goal_type', 'fundraising'] },
-                        {
-                          goal_type: '$$goal.goal_type',
-                          goal_name: '$$goal.goal_name',
-                          target_amount: '$$goal.target_amount',
-                          current_amount: {
-                            $add: [
-                              { $ifNull: ['$$goal.current_amount', 0] },
-                              amountCents
-                            ]
-                          },
-                        },
-                        '$$goal'
-                      ]
-                    }
-                  }
-                },
-                updated_at: new Date()
-              }
-            }
-          ],
-          { new: true, session } // ✅ NEW: Add session parameter
-        );
-
-        if (goalUpdateResult && goalUpdateResult.goals) {
-          const fundraisingGoals = goalUpdateResult.goals.filter(g => g.goal_type === 'fundraising');
-          fundraisingGoals.forEach(goal => {
-            console.info(`[GOAL UPDATE] Campaign funding progress: ${goal.goal_name}`, {
-              campaignId,
-              goalType: 'fundraising',
-              progress: `$${(goal.current_amount / 100).toFixed(2)}/$${(goal.target_amount / 100).toFixed(2)}`,
-              donationAdded: `$${amountDollars}`,
-              timestamp: new Date().toISOString()
-            });
-          });
-        }
-      } catch (goalError) {
-        // Goal update failure should trigger rollback
-        throw new Error(`GOAL_UPDATE_FAILED: ${goalError.message}`);
-      }
-
-      // ===== SWEEPSTAKES =====
-      // Sweepstakes entry recording disabled - using new simplified sweepstakes system
-      // No entries are tracked for donations anymore
-
-      // ===== SHARE REWARD PROCESSING (if from referral link) =====
-
-      let shareRewardResult = null;
-      if (options.referralCode) {
-        try {
-          winstonLogger.info('🔗 TransactionService.recordDonation: Processing share conversion', {
-            transactionId: transaction._id,
-            referralCode: options.referralCode,
-            campaignId,
-            amountCents,
-          });
-
-          // Process share conversion and create reward transaction
-          shareRewardResult = await ShareRewardService.processShareConversion({
-            campaignId,
-            donationTransactionId: transaction._id,
-            referralCode: options.referralCode,
-            amountCents,
-            supporterId,
-            paymentMethod,
-            session, // ✅ NEW: Pass session for atomic operations
-          });
-
-          if (shareRewardResult.success && shareRewardResult.reward_created) {
-            winstonLogger.info('✅ TransactionService: Share reward created successfully', {
-              transactionId: transaction._id,
-              rewardTransactionId: shareRewardResult.data.transaction_id,
-              rewardAmount: shareRewardResult.data.amount_dollars,
-              holdUntilDate: shareRewardResult.data.hold_until_date,
-            });
-
-            // Link the reward transaction to the donation transaction
-            transaction.related_reward_id = shareRewardResult.data.transaction_id;
-            await transaction.save({ session });
-          } else if (shareRewardResult.success && !shareRewardResult.reward_created) {
-            winstonLogger.info('ℹ️ TransactionService: Share conversion processed but no reward eligible', {
-              transactionId: transaction._id,
-              reason: shareRewardResult.reason,
-            });
-          } else {
-            // Share reward failure should trigger rollback
-            throw new Error(`SHARE_REWARD_FAILED: ${shareRewardResult.error}`);
-          }
-        } catch (error) {
-          // Rollback on share reward error
-          throw new Error(`SHARE_CONVERSION_ERROR: ${error.message}`);
-        }
-      }
-
       // ===== COMMIT TRANSACTION =====
-      // ✅ NEW: All operations succeeded - commit the transaction
       await session.commitTransaction();
       session.endSession();
 
-      // ===== EVENTS (after successful commit, no longer in transaction) =====
-
-      // Emit event for downstream handlers (email, notifications, etc.)
-      // Note: These are fire-and-forget, errors don't rollback the donation
+      // ===== EVENTS (after successful commit) =====
+      // Notify the creator that a donation is awaiting their confirmation.
+      // No share reward, milestone, or public broadcast is emitted here — those
+      // only happen on verification, so unverified/fake intents cannot trigger
+      // rewards, celebrations, or social-proof activity.
       try {
-        this.emit('donation:recorded', {
+        this.emit('donation:pending', {
           transaction_id: transaction.transaction_id,
           campaign_id: campaignId,
           creator_id: campaign.creator_id,
@@ -330,6 +212,7 @@ class TransactionService extends EventEmitter {
           net_amount_dollars: netAmountCents / 100,
           campaign_name: campaign.title,
           supporter_name: supporter.full_name || supporter.email,
+          has_referral: !!transaction.referral_code,
         });
       } catch (eventError) {
         winstonLogger.warn('⚠️ TransactionService: Event emission failed (non-blocking)', {
@@ -338,51 +221,21 @@ class TransactionService extends EventEmitter {
         });
       }
 
-      // ✅ NEW: Broadcast real-time donation update via Socket.io
-      try {
-        const RealTimeService = require('./RealTimeService');
-        RealTimeService.broadcastDonation(campaignId, {
-          transaction_id: transaction.transaction_id,
-          amount_dollars: amountDollars,
-          amount_cents: amountCents,
-          donor_name: supporter.full_name || supporter.email,
-          message: null,
-        });
-      } catch (error) {
-        winstonLogger.warn('⚠️ TransactionService: Real-time broadcast failed (non-blocking)', {
-          campaignId,
-          error: error.message,
-        });
-        // Don't fail the donation if real-time broadcast fails (non-critical)
-      }
-
       // ===== RETURN SUCCESS =====
-
       const returnData = {
         success: true,
         data: {
           transaction_id: transaction.transaction_id,
           _id: transaction._id,
-          status: transaction.status,
+          status: transaction.status, // 'pending'
           amount_cents: transaction.amount_cents,
           platform_fee_cents: transaction.platform_fee_cents,
           net_amount_cents: transaction.net_amount_cents,
+          requires_confirmation: true,
         },
-        message: 'Donation recorded successfully. Awaiting admin verification.',
+        message:
+          'Donation recorded. Send your payment to the creator, then it will appear once the creator confirms they received it.',
       };
-
-      // Add share reward info if created
-      if (shareRewardResult && shareRewardResult.success && shareRewardResult.reward_created) {
-        returnData.data.share_reward = {
-          transaction_id: shareRewardResult.data.transaction_id,
-          amount_cents: shareRewardResult.data.amount_cents,
-          amount_dollars: shareRewardResult.data.amount_dollars,
-          status: shareRewardResult.data.status,
-          hold_until_date: shareRewardResult.data.hold_until_date,
-          hold_days_remaining: shareRewardResult.data.hold_days_remaining,
-          message: shareRewardResult.message,
-        };
-      }
 
       return returnData;
     } catch (error) {
@@ -421,145 +274,481 @@ class TransactionService extends EventEmitter {
   }
 
   /**
-   * Verify a transaction (admin only)
-   * @param {ObjectId} transactionId - Transaction ID
-   * @param {ObjectId} adminId - Admin ID
+   * Map a raw payment method to one of the 4 schema-defined
+   * `metrics.donations_by_method` buckets so $inc never writes an
+   * off-schema key (which strict-mode updates would silently drop).
+   * @param {String} paymentMethod
+   * @returns {String} one of paypal|stripe|bank_transfer|other
+   * @private
+   */
+  _methodBucket(paymentMethod) {
+    if (['paypal', 'stripe', 'bank_transfer'].includes(paymentMethod)) {
+      return paymentMethod;
+    }
+    return 'other';
+  }
+
+  /**
+   * Apply or reverse the *verified* campaign accounting for a single donation.
+   * This is the one place that mutates verified totals, unique supporters,
+   * donations_by_method, the fundraising goal's current_amount, and the
+   * denormalized top-level aggregates — keeping them a single, reversible
+   * source of truth (fixes F-2 / F-7).
+   *
+   * @param {ObjectId} campaignId
+   * @param {Object} transaction - The donation transaction
+   * @param {Number} sign - +1 to apply (on verify), -1 to reverse (on reject)
+   * @param {Object} session - Mongo session for atomicity
+   * @private
+   */
+  async _adjustVerifiedDonationAccounting(campaignId, transaction, sign, session) {
+    const amountCents = transaction.amount_cents;
+    const supporterId = transaction.supporter_id;
+    const bucket = this._methodBucket(transaction.payment_method);
+
+    // 1) Counters + per-method breakdown
+    const inc = {
+      'metrics.total_donations': sign,
+      'metrics.total_donation_amount': sign * amountCents,
+    };
+    inc[`metrics.donations_by_method.${bucket}`] = sign;
+
+    const update = { $inc: inc };
+    if (sign > 0) {
+      update.$addToSet = { 'metrics.unique_supporters': supporterId };
+    }
+    await Campaign.findByIdAndUpdate(campaignId, update, { session });
+
+    // 2) Unique-supporter removal on reversal — but only if this donor has no
+    //    OTHER verified donation on the campaign, so we never undercount.
+    if (sign < 0) {
+      const otherVerified = await Transaction.countDocuments({
+        campaign_id: campaignId,
+        supporter_id: supporterId,
+        transaction_type: 'donation',
+        status: 'verified',
+        _id: { $ne: transaction._id },
+      }).session(session);
+
+      if (otherVerified === 0) {
+        await Campaign.findByIdAndUpdate(
+          campaignId,
+          { $pull: { 'metrics.unique_supporters': supporterId } },
+          { session }
+        );
+      }
+    }
+
+    // 3) Fundraising goal current_amount (clamped at >= 0 on reversal)
+    await Campaign.findByIdAndUpdate(
+      campaignId,
+      [
+        {
+          $set: {
+            goals: {
+              $map: {
+                input: '$goals',
+                as: 'goal',
+                in: {
+                  $cond: [
+                    { $eq: ['$$goal.goal_type', 'fundraising'] },
+                    {
+                      goal_type: '$$goal.goal_type',
+                      goal_name: '$$goal.goal_name',
+                      target_amount: '$$goal.target_amount',
+                      current_amount: {
+                        $max: [
+                          0,
+                          {
+                            $add: [
+                              { $ifNull: ['$$goal.current_amount', 0] },
+                              sign * amountCents,
+                            ],
+                          },
+                        ],
+                      },
+                    },
+                    '$$goal',
+                  ],
+                },
+              },
+            },
+            updated_at: new Date(),
+          },
+        },
+      ],
+      { session }
+    );
+
+    // 4) Recompute denormalized top-level aggregates from the fresh metrics
+    const fresh = await Campaign.findById(campaignId).session(session);
+    const totalDonations = fresh.metrics.total_donations || 0;
+    const totalDonationAmount = fresh.metrics.total_donation_amount || 0;
+    const uniqueDonors = fresh.metrics.unique_supporters?.length || 0;
+    const avgDonation = totalDonations > 0 ? Math.round(totalDonationAmount / totalDonations) : 0;
+
+    // NOTE: the canonical count/amount live in metrics.total_donations (count)
+    // and metrics.total_donation_amount (amount). We intentionally do NOT mirror
+    // them into a root `total_donations` field — that name is ambiguous and the
+    // field isn't in the schema (strict mode would drop the write anyway).
+    // `total_donors` and `average_donation` ARE real schema fields, so keep them.
+    await Campaign.findByIdAndUpdate(
+      campaignId,
+      {
+        total_donors: uniqueDonors,
+        average_donation: avgDonation,
+      },
+      { session }
+    );
+
+    return fresh;
+  }
+
+  /**
+   * Resolve whether an actor may confirm/reject a campaign's donations.
+   * Allowed for the campaign creator ("I received this") or a platform admin.
+   * @param {ObjectId} actorId
+   * @param {Object} campaign
+   * @returns {Promise<{role: 'creator'|'admin'}>}
+   * @private
+   */
+  async _resolveDonationActor(actorId, campaign) {
+    if (!actorId) {
+      throw new Error('UNAUTHORIZED: Authentication required');
+    }
+    const actor = await User.findById(actorId);
+    if (!actor) {
+      throw new Error('UNAUTHORIZED: Actor not found');
+    }
+    const isAdmin = !!(actor.is_admin || (Array.isArray(actor.roles) && actor.roles.includes('admin')));
+    const isCreator = campaign.creator_id.toString() === actorId.toString();
+    if (!isAdmin && !isCreator) {
+      throw new Error('UNAUTHORIZED: Only the campaign creator or an admin can confirm or reject donations');
+    }
+    // Prefer the 'admin' label when the actor holds admin rights.
+    return { role: isAdmin ? 'admin' : 'creator' };
+  }
+
+  /**
+   * Confirm receipt of a manual donation (creator or admin).
+   * Moves the donation from `pending` → `verified`, applies verified accounting
+   * atomically, then (post-commit, non-fatal) processes any share-to-Earn
+   * conversion, milestone celebrations, real-time broadcast and fee tracking.
+   *
+   * @param {ObjectId} transactionId - Transaction _id
+   * @param {ObjectId} actorId - Creator or admin confirming receipt
    * @returns {Promise<Object>} Verified transaction
    */
-  async verifyTransaction(transactionId, adminId) {
+  async verifyTransaction(transactionId, actorId) {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+    let transaction;
+    let campaign;
+    let actorRole = 'admin';
     try {
-      // Check admin permission
-      const admin = await User.findById(adminId);
-      if (!admin || !admin.is_admin) {
-        throw new Error('UNAUTHORIZED: Only admins can verify transactions');
-      }
-
-      // Find transaction
-      const transaction = await Transaction.findById(transactionId);
+      transaction = await Transaction.findById(transactionId).session(session);
       if (!transaction) {
         throw new Error('TRANSACTION_NOT_FOUND: Transaction does not exist');
       }
-
-      // Validate transaction state
+      if (transaction.transaction_type !== 'donation') {
+        throw new Error('INVALID_TYPE: Only donations can be confirmed here');
+      }
       if (transaction.status !== 'pending') {
-        throw new Error(`INVALID_STATE: Cannot verify ${transaction.status} transaction`);
+        throw new Error(`INVALID_STATE: Cannot confirm ${transaction.status} transaction`);
       }
 
-      // Spot-check: Verify amount looks reasonable
-      if (transaction.amount_cents < 100 || transaction.amount_cents > 1000000) {
-        throw new Error('SUSPICIOUS_AMOUNT: Amount outside normal range');
-      }
-
-      // Verify campaign still exists and is active
-      const campaign = await Campaign.findById(transaction.campaign_id);
+      campaign = await Campaign.findById(transaction.campaign_id).session(session);
       if (!campaign) {
         throw new Error('CAMPAIGN_DELETED: Associated campaign no longer exists');
       }
 
-      // Verify supporter exists
-      const supporter = await User.findById(transaction.supporter_id);
+      // Authorization: creator or admin
+      const actor = await this._resolveDonationActor(actorId, campaign);
+      actorRole = actor.role;
+
+      const supporter = await User.findById(transaction.supporter_id).session(session);
       if (!supporter) {
         throw new Error('SUPPORTER_DELETED: Associated supporter no longer exists');
       }
 
-      // Verify amount is not excessive relative to campaign
+      // Spot-check: flag (don't block) an unusually large donation
       const avgDonation = campaign.metrics?.total_donations > 0
         ? campaign.metrics.total_donation_amount / campaign.metrics.total_donations / 100
         : 0;
       if (avgDonation > 0 && transaction.amount_dollars > avgDonation * 5) {
-        // Log warning but don't fail - admin decision
-        transaction.addNote('warning', 'Donation 5x larger than average', adminId);
+        transaction.addNote('warning', 'Donation 5x larger than average', actorId);
       }
 
-      // Update transaction
-      transaction.verify(adminId);
-      await transaction.save();
+      // Move pending → verified accounting atomically:
+      // 1) drop from pending pipeline, 2) apply verified accounting (+1)
+      await Campaign.findByIdAndUpdate(
+        transaction.campaign_id,
+        {
+          $inc: {
+            'metrics.pending_donations': -1,
+            'metrics.pending_donation_amount': -transaction.amount_cents,
+          },
+        },
+        { session }
+      );
+      await this._adjustVerifiedDonationAccounting(transaction.campaign_id, transaction, +1, session);
 
-      // Emit verification event
-      this.emit('transaction:verified', {
-        transaction_id: transaction.transaction_id,
-        campaign_id: transaction.campaign_id,
-        verified_by: adminId,
-        amount_dollars: transaction.amount_dollars,
-      });
+      transaction.verify(actorId, actorRole);
+      await transaction.save({ session });
 
-      return transaction;
+      await session.commitTransaction();
+      session.endSession();
     } catch (error) {
+      try { await session.abortTransaction(); } catch (_) { /* already ended */ }
+      try { session.endSession(); } catch (_) { /* noop */ }
       console.error('verifyTransaction error:', error.message);
       throw new Error(`VERIFY_FAILED: ${error.message}`);
     }
+
+    // ===== POST-COMMIT side effects (non-fatal; never roll back a confirmation) =====
+
+    // Share-to-Earn conversion — only now, for confirmed real money.
+    if (transaction.referral_code) {
+      try {
+        const result = await ShareRewardService.processShareConversion({
+          campaignId: transaction.campaign_id,
+          donationTransactionId: transaction._id,
+          referralCode: transaction.referral_code,
+          amountCents: transaction.amount_cents,
+          supporterId: transaction.supporter_id,
+          paymentMethod: transaction.payment_method,
+        });
+        winstonLogger.info('🔗 verifyTransaction: Share conversion processed', {
+          transactionId: transaction.transaction_id,
+          reward_created: result?.reward_created || false,
+          reason: result?.reason || result?.error,
+        });
+      } catch (err) {
+        winstonLogger.error('⚠️ verifyTransaction: Share conversion failed (non-fatal)', {
+          transactionId: transaction.transaction_id,
+          error: err.message,
+        });
+      }
+    }
+
+    // Boost conversion tracking — a confirmed donation is a conversion. Powers
+    // the boost dashboard's "Conversions" stat and real (revenue-based) ROI.
+    // Best-effort: tracking must never roll back a confirmed donation.
+    try {
+      const CampaignBoost = require('../models/CampaignBoost');
+      await CampaignBoost.recordBoostEvent(transaction.campaign_id, 'conversion', {
+        revenueCents: transaction.amount_cents,
+      });
+    } catch (err) {
+      winstonLogger.warn('⚠️ verifyTransaction: Boost conversion tracking failed (non-fatal)', {
+        transactionId: transaction.transaction_id,
+        error: err.message,
+      });
+    }
+
+    // CA-19 milestone celebrations — only fire on confirmed totals.
+    try {
+      const CampaignMilestoneService = require('./CampaignMilestoneService');
+      CampaignMilestoneService.checkAndCreateMilestones(transaction.campaign_id).catch((err) => {
+        winstonLogger.warn('⚠️ verifyTransaction: Milestone check failed (non-blocking)', {
+          campaignId: transaction.campaign_id,
+          error: err.message,
+        });
+      });
+    } catch (err) {
+      winstonLogger.warn('⚠️ verifyTransaction: Milestone check threw (non-blocking)', {
+        error: err.message,
+      });
+    }
+
+    // Real-time social-proof broadcast — only for confirmed donations.
+    try {
+      const RealTimeService = require('./RealTimeService');
+      RealTimeService.broadcastDonation(transaction.campaign_id, {
+        transaction_id: transaction.transaction_id,
+        amount_dollars: transaction.amount_dollars,
+        amount_cents: transaction.amount_cents,
+        donor_name: null,
+        message: null,
+      });
+    } catch (err) {
+      winstonLogger.warn('⚠️ verifyTransaction: Real-time broadcast failed (non-blocking)', {
+        error: err.message,
+      });
+    }
+
+    // CF-3: the platform fee is now genuinely OWED by the creator (the donation
+    // is confirmed). Record it on the fee-settlement ledger as 'verified' (owed),
+    // attributed to the creator. Idempotent, so re-confirmation can't double-bill.
+    try {
+      const FeeTrackingService = require('./FeeTrackingService');
+      if (FeeTrackingService?.recordFee) {
+        await FeeTrackingService.recordFee({
+          campaign_id: transaction.campaign_id,
+          creator_id: transaction.creator_id,
+          transaction_id: transaction._id,
+          gross_cents: transaction.amount_cents,
+          fee_cents: transaction.platform_fee_cents,
+          status: 'verified',
+        });
+      }
+    } catch (err) {
+      winstonLogger.warn('⚠️ verifyTransaction: Fee tracking failed (non-blocking)', {
+        error: err.message,
+      });
+    }
+
+    // Verification event for notifications/analytics.
+    try {
+      this.emit('transaction:verified', {
+        transaction_id: transaction.transaction_id,
+        campaign_id: transaction.campaign_id,
+        supporter_id: transaction.supporter_id,
+        verified_by: actorId,
+        verified_by_role: actorRole,
+        amount_dollars: transaction.amount_dollars,
+      });
+
+      // Gamification (XP/streaks/missions/challenges) is bridged off
+      // 'donation:recorded'. It must only fire for CONFIRMED donations — never
+      // for unverified intents — so we emit it here at verification time, not
+      // when the donation was first recorded.
+      this.emit('donation:recorded', {
+        transaction_id: transaction.transaction_id,
+        campaign_id: transaction.campaign_id,
+        creator_id: transaction.creator_id,
+        supporter_id: transaction.supporter_id,
+        amount_dollars: transaction.amount_dollars,
+        amount_cents: transaction.amount_cents,
+      });
+    } catch (err) {
+      winstonLogger.warn('⚠️ verifyTransaction: Event emission failed (non-blocking)', {
+        error: err.message,
+      });
+    }
+
+    // CE-6: thank-you / receipt email — fires only on CONFIRMED donations, with
+    // the correct (campaign-driven) tax-deductibility note. Non-blocking.
+    try {
+      const [donor, campaign] = await Promise.all([
+        User.findById(transaction.supporter_id).select('email display_name first_name last_name').lean(),
+        Campaign.findById(transaction.campaign_id).select('title tax_deductible tax_id').lean(),
+      ]);
+      if (donor?.email) {
+        const emailService = require('../utils/emailService');
+        const donorName =
+          donor.display_name ||
+          [donor.first_name, donor.last_name].filter(Boolean).join(' ') ||
+          'Supporter';
+        await emailService.sendDonationConfirmationEmail(donor.email, {
+          campaignTitle: campaign?.title || 'a HonestNeed campaign',
+          amount: transaction.amount_cents,
+          donorName,
+          transactionId: transaction.transaction_id,
+          taxDeductible: campaign?.tax_deductible === true,
+          taxId: campaign?.tax_deductible === true ? (campaign?.tax_id || null) : null,
+        });
+      }
+    } catch (err) {
+      winstonLogger.warn('⚠️ verifyTransaction: Thank-you email failed (non-blocking)', {
+        transactionId: transaction.transaction_id,
+        error: err.message,
+      });
+    }
+
+    return transaction;
   }
 
   /**
-   * Reject a transaction (admin only)
-   * @param {ObjectId} transactionId - Transaction ID
-   * @param {ObjectId} adminId - Admin ID
-   * @param {String} reason - Rejection reason
+   * Reject a manual donation (creator or admin) — reversible.
+   * If the donation was still `pending`, only the pending pipeline is reduced.
+   * If it had already been `verified`, the full verified accounting is reversed
+   * (fixes F-2: rejected/charged-back donations no longer leave inflated totals).
+   *
+   * @param {ObjectId} transactionId - Transaction _id
+   * @param {ObjectId} actorId - Creator or admin rejecting
+   * @param {String} reason - Required rejection reason
    * @returns {Promise<Object>} Rejected transaction
    */
-  async rejectTransaction(transactionId, adminId, reason) {
+  async rejectTransaction(transactionId, actorId, reason) {
+    if (!reason || reason.trim().length === 0) {
+      throw new Error('REJECT_FAILED: REASON_REQUIRED: Rejection reason is required');
+    }
+
+    const session = await mongoose.startSession();
+    session.startTransaction();
+    let transaction;
+    let wasVerified = false;
     try {
-      // Check admin permission
-      const admin = await User.findById(adminId);
-      if (!admin || !admin.is_admin) {
-        throw new Error('UNAUTHORIZED: Only admins can reject transactions');
-      }
-
-      if (!reason || reason.trim().length === 0) {
-        throw new Error('REASON_REQUIRED: Rejection reason is required');
-      }
-
-      // Find transaction
-      const transaction = await Transaction.findById(transactionId);
+      transaction = await Transaction.findById(transactionId).session(session);
       if (!transaction) {
         throw new Error('TRANSACTION_NOT_FOUND: Transaction does not exist');
       }
-
-      // Validate transaction state
+      if (transaction.transaction_type !== 'donation') {
+        throw new Error('INVALID_TYPE: Only donations can be rejected here');
+      }
       if (transaction.status !== 'pending' && transaction.status !== 'verified') {
         throw new Error(`INVALID_STATE: Cannot reject ${transaction.status} transaction`);
       }
+      wasVerified = transaction.status === 'verified';
 
-      const wasVerified = transaction.status === 'verified';
+      const campaign = await Campaign.findById(transaction.campaign_id).session(session);
+      if (!campaign) {
+        throw new Error('CAMPAIGN_DELETED: Associated campaign no longer exists');
+      }
 
-      // Revert metrics if transaction was already being counted
-      if (!wasVerified) {
-        // Only revert if metrics were already applied
-        // (they're applied on recording, so revert on rejection)
+      // Authorization: creator or admin
+      await this._resolveDonationActor(actorId, campaign);
+
+      if (transaction.status === 'pending') {
+        // Only in the pending pipeline — remove it from there.
         await Campaign.findByIdAndUpdate(
           transaction.campaign_id,
           {
             $inc: {
-              'metrics.total_donations': -1,
-              'metrics.total_donation_amount': -transaction.amount_cents,
+              'metrics.pending_donations': -1,
+              'metrics.pending_donation_amount': -transaction.amount_cents,
             },
-            $pull: {
-              'metrics.unique_supporters': transaction.supporter_id,
-            },
-          }
+          },
+          { session }
         );
-
-        // Revert sweepstakes entries
-        if (transaction.sweepstakes_entries_awarded > 0) {
-          try {
-            if (this.sweepstakesService?.removeEntry) {
-              await this.sweepstakesService.removeEntry(
-                transaction.campaign_id,
-                transaction.supporter_id,
-                transaction.sweepstakes_entries_awarded
-              );
-            }
-          } catch (error) {
-            console.warn('Sweepstakes entry reversal failed:', error.message);
-          }
-        }
+      } else {
+        // Was verified and publicly counted — reverse the full accounting.
+        await this._adjustVerifiedDonationAccounting(transaction.campaign_id, transaction, -1, session);
       }
 
-      // Update transaction
-      transaction.reject(adminId, reason);
-      await transaction.save();
+      transaction.reject(actorId, reason);
+      await transaction.save({ session });
 
-      // Emit event for notification
+      await session.commitTransaction();
+      session.endSession();
+    } catch (error) {
+      try { await session.abortTransaction(); } catch (_) { /* already ended */ }
+      try { session.endSession(); } catch (_) { /* noop */ }
+      console.error('rejectTransaction error:', error.message);
+      // Preserve REASON_REQUIRED prefix passthrough; otherwise wrap.
+      if (error.message.startsWith('REJECT_FAILED:')) throw error;
+      throw new Error(`REJECT_FAILED: ${error.message}`);
+    }
+
+    // ===== POST-COMMIT side effects (non-fatal) =====
+
+    // CF-3: if the donation had been confirmed, a platform fee was recorded as
+    // owed — reverse it so the creator is no longer billed for a rejected /
+    // charged-back donation. (Pending donations never recorded a fee.)
+    if (wasVerified) {
+      try {
+        const FeeTrackingService = require('./FeeTrackingService');
+        await FeeTrackingService.reverseFee(transaction._id, `Donation rejected: ${reason}`, actorId);
+      } catch (err) {
+        winstonLogger.warn('⚠️ rejectTransaction: Fee reversal failed (non-blocking)', {
+          transactionId: transaction.transaction_id,
+          error: err.message,
+        });
+      }
+    }
+
+    try {
       this.emit('transaction:rejected', {
         transaction_id: transaction.transaction_id,
         campaign_id: transaction.campaign_id,
@@ -567,27 +756,258 @@ class TransactionService extends EventEmitter {
         reason,
         amount_dollars: transaction.amount_dollars,
       });
+    } catch (err) {
+      winstonLogger.warn('⚠️ rejectTransaction: Event emission failed (non-blocking)', {
+        error: err.message,
+      });
+    }
 
-      // Send notification to supporter
-      // (In production, this would trigger an email)
-      try {
-        if (this.notificationService?.notify) {
-          await this.notificationService.notify(transaction.supporter_id, {
-            type: 'donation_rejected',
-            title: 'Donation Not Approved',
-            message: `Your donation of $${transaction.amount_dollars} to the campaign has not been approved. Reason: ${reason}`,
-            transaction_id: transaction.transaction_id,
-          });
-        }
-      } catch (error) {
-        console.warn('Notification failed:', error.message);
+    try {
+      if (this.notificationService?.notify) {
+        await this.notificationService.notify(transaction.supporter_id, {
+          type: 'donation_rejected',
+          title: 'Donation Not Confirmed',
+          message: `Your donation of $${transaction.amount_dollars} was not confirmed by the campaign. Reason: ${reason}`,
+          transaction_id: transaction.transaction_id,
+        });
+      }
+    } catch (err) {
+      winstonLogger.warn('⚠️ rejectTransaction: Notification failed (non-blocking)', {
+        error: err.message,
+      });
+    }
+
+    return transaction;
+  }
+
+  /**
+   * CE-7: Donor requests a refund on their own donation.
+   * @param {ObjectId} transactionId
+   * @param {ObjectId} donorId - must be the donation's supporter
+   * @param {string} reason
+   * @returns {Promise<Object>} updated transaction
+   */
+  async requestRefund(transactionId, donorId, reason) {
+    if (!reason || reason.trim().length === 0) {
+      throw new Error('REASON_REQUIRED: A refund reason is required');
+    }
+    const transaction = await Transaction.findById(transactionId);
+    if (!transaction) throw new Error('TRANSACTION_NOT_FOUND: Transaction does not exist');
+    if (transaction.transaction_type !== 'donation') {
+      throw new Error('INVALID_TYPE: Only donations can be refunded');
+    }
+    if (transaction.supporter_id.toString() !== donorId.toString()) {
+      throw new Error('UNAUTHORIZED: You can only request refunds for your own donations');
+    }
+    if (!['pending', 'verified'].includes(transaction.status)) {
+      throw new Error(`INVALID_STATE: Cannot request a refund for a ${transaction.status} donation`);
+    }
+    const rr = transaction.refund_request;
+    if (rr && rr.status === 'requested') {
+      throw new Error('INVALID_STATE: A refund request is already pending for this donation');
+    }
+    if (rr && rr.status === 'approved') {
+      throw new Error('INVALID_STATE: This donation has already been refunded');
+    }
+
+    transaction.refund_request = {
+      status: 'requested',
+      reason: reason.trim(),
+      requested_at: new Date(),
+      decided_by: null,
+      decided_at: null,
+      decision_note: null,
+    };
+    transaction.addNote('refund_requested', reason.trim(), donorId);
+    await transaction.save();
+
+    // Notify the creator that a refund request is awaiting their decision.
+    try {
+      this.emit('donation:refund_requested', {
+        transaction_id: transaction.transaction_id,
+        campaign_id: transaction.campaign_id,
+        creator_id: transaction.creator_id,
+        supporter_id: transaction.supporter_id,
+        amount_dollars: transaction.amount_dollars,
+        reason: reason.trim(),
+      });
+    } catch (_) { /* non-blocking */ }
+
+    return transaction;
+  }
+
+  /**
+   * CE-7: Creator/admin decides a donor's refund request.
+   * Approve = money returned off-platform; donation reversed (accounting + fee)
+   * and marked `refunded`. Decline = request closed with a note. Reversible &
+   * consistent with reject/verify accounting.
+   *
+   * @param {ObjectId} transactionId
+   * @param {ObjectId} actorId - creator or admin
+   * @param {'approve'|'decline'} decision
+   * @param {string} [note]
+   * @returns {Promise<Object>} updated transaction
+   */
+  async decideRefundRequest(transactionId, actorId, decision, note = '') {
+    if (!['approve', 'decline'].includes(decision)) {
+      throw new Error('INVALID_DECISION: decision must be "approve" or "decline"');
+    }
+
+    const session = await mongoose.startSession();
+    session.startTransaction();
+    let transaction;
+    let didReverseVerified = false;
+    try {
+      transaction = await Transaction.findById(transactionId).session(session);
+      if (!transaction) throw new Error('TRANSACTION_NOT_FOUND: Transaction does not exist');
+      if (transaction.transaction_type !== 'donation') {
+        throw new Error('INVALID_TYPE: Only donations can be refunded');
+      }
+      if (!transaction.refund_request || transaction.refund_request.status !== 'requested') {
+        throw new Error('INVALID_STATE: No pending refund request for this donation');
       }
 
-      return transaction;
+      const campaign = await Campaign.findById(transaction.campaign_id).session(session);
+      if (!campaign) throw new Error('CAMPAIGN_DELETED: Associated campaign no longer exists');
+
+      // Authorization: campaign creator or admin
+      await this._resolveDonationActor(actorId, campaign);
+
+      if (decision === 'approve') {
+        if (transaction.status === 'verified') {
+          // Was publicly counted — reverse the full accounting.
+          await this._adjustVerifiedDonationAccounting(transaction.campaign_id, transaction, -1, session);
+          didReverseVerified = true;
+        } else if (transaction.status === 'pending') {
+          // Only in the pending pipeline — drop it from there.
+          await Campaign.findByIdAndUpdate(
+            transaction.campaign_id,
+            { $inc: { 'metrics.pending_donations': -1, 'metrics.pending_donation_amount': -transaction.amount_cents } },
+            { session }
+          );
+        } else {
+          throw new Error(`INVALID_STATE: Cannot refund a ${transaction.status} donation`);
+        }
+
+        transaction.status = 'refunded';
+        transaction.refund_reason = transaction.refund_request.reason || 'Donor refund request approved';
+        transaction.refunded_by = actorId;
+        transaction.refunded_at = new Date();
+        transaction.refund_request.status = 'approved';
+        transaction.refund_request.decided_by = actorId;
+        transaction.refund_request.decided_at = new Date();
+        transaction.refund_request.decision_note = note || null;
+        transaction.addNote('refund_approved', note || 'Refund request approved', actorId);
+      } else {
+        transaction.refund_request.status = 'declined';
+        transaction.refund_request.decided_by = actorId;
+        transaction.refund_request.decided_at = new Date();
+        transaction.refund_request.decision_note = note || null;
+        transaction.addNote('refund_declined', note || 'Refund request declined', actorId);
+      }
+
+      await transaction.save({ session });
+      await session.commitTransaction();
+      session.endSession();
     } catch (error) {
-      console.error('rejectTransaction error:', error.message);
-      throw new Error(`REJECT_FAILED: ${error.message}`);
+      try { await session.abortTransaction(); } catch (_) { /* already ended */ }
+      try { session.endSession(); } catch (_) { /* noop */ }
+      throw new Error(`REFUND_DECISION_FAILED: ${error.message}`);
     }
+
+    // ===== POST-COMMIT (non-fatal) =====
+    // Reverse the owed platform fee for a refunded, previously-verified donation.
+    if (decision === 'approve' && didReverseVerified) {
+      try {
+        const FeeTrackingService = require('./FeeTrackingService');
+        await FeeTrackingService.reverseFee(transaction._id, 'Donation refunded (donor request)', actorId);
+      } catch (err) {
+        winstonLogger.warn('⚠️ decideRefundRequest: fee reversal failed (non-blocking)', {
+          transactionId: transaction.transaction_id,
+          error: err.message,
+        });
+      }
+    }
+
+    try {
+      this.emit(decision === 'approve' ? 'donation:refunded' : 'donation:refund_declined', {
+        transaction_id: transaction.transaction_id,
+        campaign_id: transaction.campaign_id,
+        supporter_id: transaction.supporter_id,
+        decided_by: actorId,
+        amount_dollars: transaction.amount_dollars,
+        note: note || null,
+      });
+    } catch (_) { /* non-blocking */ }
+
+    return transaction;
+  }
+
+  /**
+   * CE-7: List refund requests for a campaign (creator or admin).
+   * @param {ObjectId} campaignId
+   * @param {ObjectId} actorId
+   * @param {Object} [opts] - { status='requested', page=1, limit=25 }
+   * @returns {Promise<Object>} { requests, pagination }
+   */
+  async getCampaignRefundRequests(campaignId, actorId, opts = {}) {
+    const campaign = await Campaign.findById(campaignId);
+    if (!campaign) {
+      const e = new Error('CAMPAIGN_NOT_FOUND: Campaign does not exist');
+      e.statusCode = 404;
+      throw e;
+    }
+    await this._resolveDonationActor(actorId, campaign);
+
+    const status = opts.status || 'requested';
+    const page = Math.max(1, parseInt(opts.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(opts.limit, 10) || 25));
+    const skip = (page - 1) * limit;
+
+    const query = {
+      campaign_id: campaign._id,
+      transaction_type: 'donation',
+      'refund_request.status': status,
+    };
+
+    const [rows, total] = await Promise.all([
+      Transaction.find(query)
+        .sort({ 'refund_request.requested_at': -1 })
+        .skip(skip)
+        .limit(limit)
+        .populate('supporter_id', 'email display_name first_name last_name')
+        .lean(),
+      Transaction.countDocuments(query),
+    ]);
+
+    const requests = rows.map((t) => {
+      const d = t.supporter_id;
+      const donorName = d
+        ? (d.display_name || [d.first_name, d.last_name].filter(Boolean).join(' ') || d.email || 'Donor')
+        : 'Deleted user';
+      return {
+        transaction_id: t.transaction_id,
+        _id: t._id,
+        donor_name: donorName,
+        donor_email: d?.email || null,
+        amount_dollars: (t.amount_cents / 100).toFixed(2),
+        amount_cents: t.amount_cents,
+        donation_status: t.status,
+        refund_request: {
+          status: t.refund_request?.status,
+          reason: t.refund_request?.reason,
+          requested_at: t.refund_request?.requested_at,
+          decided_at: t.refund_request?.decided_at,
+          decision_note: t.refund_request?.decision_note,
+        },
+        created_at: t.created_at,
+      };
+    });
+
+    return {
+      requests,
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+    };
   }
 
   /**

@@ -16,17 +16,55 @@ const { winstonLogger } = require('../utils/logger');
  */
 exports.listVolunteers = async (req, res) => {
   try {
-    const { type, minRating = 0, sortBy = 'rating', skip = 0, limit = 20 } = req.query;
+    const {
+      type,
+      minRating = 0,
+      sortBy = 'rating',
+      skip = 0,
+      limit = 20,
+      search,
+      skills,
+      experience_level,
+      open_to,
+      city,
+    } = req.query;
 
     // Build filter
     const filter = {
       status: 'active',
       deleted_at: null,
-      rating: { $gte: minRating },
+      rating: { $gte: Number(minRating) || 0 },
     };
 
     if (type) {
       filter.volunteering_type = type;
+    }
+    if (experience_level) {
+      filter.experience_level = experience_level;
+    }
+    if (open_to) {
+      // 'both' volunteers surface in either a paid or volunteer search.
+      filter['engagement.open_to'] = open_to === 'paid'
+        ? { $in: ['paid', 'both'] }
+        : open_to === 'volunteer_only'
+          ? { $in: ['volunteer_only', 'both'] }
+          : open_to;
+    }
+    if (city) {
+      filter['location.city'] = { $regex: String(city).trim(), $options: 'i' };
+    }
+    if (skills) {
+      const skillList = String(skills)
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (skillList.length) {
+        filter.skills = { $in: skillList.map((s) => new RegExp(`^${s}$`, 'i')) };
+      }
+    }
+    if (search) {
+      const rx = { $regex: String(search).trim(), $options: 'i' };
+      filter.$or = [{ headline: rx }, { bio: rx }, { skills: rx }];
     }
 
     // Build sort
@@ -40,22 +78,38 @@ exports.listVolunteers = async (req, res) => {
     const volunteers = await VolunteerProfile.find(filter)
       .sort(sortOption)
       .skip(parseInt(skip))
-      .limit(parseInt(limit))
+      .limit(Math.min(parseInt(limit) || 20, 50))
+      .populate('user_id', 'display_name username profile_picture avatar_url')
       .lean();
 
-    // Remove sensitive fields
-    const volunteers_display = volunteers.map((v) => ({
-      id: v._id,
-      user_id: v.user_id,
-      bio: v.bio,
-      volunteering_type: v.volunteering_type,
-      skills: v.skills,
-      total_hours: v.total_hours,
-      rating: v.rating,
-      review_count: v.review_count,
-      badges: v.badges,
-      joined_date: v.joined_date,
-    }));
+    // Remove sensitive fields; expose the employer-facing summary used by the
+    // directory cards (full detail comes from GET /volunteers/:id).
+    const volunteers_display = volunteers.map((v) => {
+      const u = v.user_id && typeof v.user_id === 'object' ? v.user_id : null;
+      return {
+        id: v._id,
+        user_id: u?._id || v.user_id,
+        display_name: u?.display_name || u?.username || 'Volunteer',
+        avatar_url: u?.profile_picture || u?.avatar_url || null,
+        headline: v.headline || '',
+        bio: v.bio,
+        volunteering_type: v.volunteering_type,
+        experience_level: v.experience_level,
+        years_experience: v.years_experience,
+        skills: v.skills,
+        languages: v.languages,
+        location: v.location,
+        engagement: v.engagement,
+        work_preferences: v.work_preferences,
+        availability: v.availability,
+        total_hours: v.total_hours,
+        total_assignments: v.total_assignments,
+        rating: v.rating,
+        review_count: v.review_count,
+        badges: v.badges,
+        joined_date: v.joined_date,
+      };
+    });
 
     const total = await VolunteerProfile.countDocuments(filter);
 
@@ -98,7 +152,9 @@ exports.getVolunteerDetail = async (req, res) => {
     }
 
     // Get user info
-    const user = await User.findById(volunteer.user_id).select('display_name profile_picture email location -password_hash').lean();
+    // Inclusion projection — listing fields already excludes password_hash, so
+    // mixing in `-password_hash` would make Mongoose throw (mixed projection).
+    const user = await User.findById(volunteer.user_id).select('display_name profile_picture email location').lean();
 
     return res.status(200).json({
       success: true,
@@ -129,7 +185,22 @@ exports.getVolunteerDetail = async (req, res) => {
 exports.registerVolunteer = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { volunteering_type, bio, skills = [], availability = {} } = req.body;
+    const {
+      volunteering_type,
+      bio,
+      skills = [],
+      availability = {},
+      headline,
+      location = {},
+      languages = [],
+      experience_level,
+      years_experience,
+      engagement = {},
+      work_preferences = {},
+      links = {},
+      contact = {},
+      certifications = [],
+    } = req.body;
 
     // Validate required fields
     if (!volunteering_type) {
@@ -174,6 +245,37 @@ exports.registerVolunteer = async (req, res) => {
       volunteering_type,
       bio,
       skills: skills.slice(0, 10), // Max 10 skills
+      headline,
+      location: {
+        city: location.city || '',
+        region: location.region || '',
+        country: location.country || '',
+      },
+      languages: Array.isArray(languages) ? languages.slice(0, 15) : [],
+      experience_level: experience_level || 'beginner',
+      years_experience: years_experience || 0,
+      engagement: {
+        open_to: engagement.open_to || 'volunteer_only',
+        expected_rate: engagement.expected_rate ?? null,
+        rate_currency: engagement.rate_currency || 'NGN',
+        rate_period: engagement.rate_period || 'hour',
+      },
+      work_preferences: {
+        remote: work_preferences.remote !== false,
+        onsite: work_preferences.onsite !== false,
+        willing_to_travel: work_preferences.willing_to_travel === true,
+      },
+      links: {
+        portfolio_url: links.portfolio_url || '',
+        linkedin_url: links.linkedin_url || '',
+        resume_url: links.resume_url || '',
+      },
+      contact: {
+        email: contact.email || '',
+        phone: contact.phone || '',
+        preferred_method: contact.preferred_method || 'inApp',
+      },
+      certifications: Array.isArray(certifications) ? certifications.slice(0, 20) : [],
       availability: {
         days_per_week: availability.days_per_week || 0,
         hours_per_week: availability.hours_per_week || 0,
@@ -217,7 +319,22 @@ exports.updateVolunteerProfile = async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user.id;
-    const { bio, skills, availability, certifications } = req.body;
+    const {
+      bio,
+      skills,
+      availability,
+      certifications,
+      headline,
+      location,
+      languages,
+      experience_level,
+      years_experience,
+      engagement,
+      work_preferences,
+      links,
+      contact,
+      volunteering_type,
+    } = req.body;
 
     const volunteer = await VolunteerProfile.findById(id);
 
@@ -241,6 +358,26 @@ exports.updateVolunteerProfile = async (req, res) => {
     // Update allowed fields
     if (bio !== undefined) volunteer.bio = bio;
     if (skills !== undefined) volunteer.skills = skills.slice(0, 10);
+    if (volunteering_type !== undefined) volunteer.volunteering_type = volunteering_type;
+    if (headline !== undefined) volunteer.headline = headline;
+    if (experience_level !== undefined) volunteer.experience_level = experience_level;
+    if (years_experience !== undefined) volunteer.years_experience = years_experience;
+    if (languages !== undefined) volunteer.languages = Array.isArray(languages) ? languages.slice(0, 15) : [];
+    if (location !== undefined) {
+      volunteer.location = { ...volunteer.location?.toObject?.() ?? volunteer.location, ...location };
+    }
+    if (engagement !== undefined) {
+      volunteer.engagement = { ...volunteer.engagement?.toObject?.() ?? volunteer.engagement, ...engagement };
+    }
+    if (work_preferences !== undefined) {
+      volunteer.work_preferences = { ...volunteer.work_preferences?.toObject?.() ?? volunteer.work_preferences, ...work_preferences };
+    }
+    if (links !== undefined) {
+      volunteer.links = { ...volunteer.links?.toObject?.() ?? volunteer.links, ...links };
+    }
+    if (contact !== undefined) {
+      volunteer.contact = { ...volunteer.contact?.toObject?.() ?? volunteer.contact, ...contact };
+    }
     if (availability !== undefined) {
       volunteer.availability = {
         ...volunteer.availability,
@@ -695,6 +832,14 @@ exports.createAssignmentRequest = async (req, res) => {
       statusCode = 404;
       errorCode = 'CAMPAIGN_NOT_FOUND';
       message = 'Campaign not found';
+    } else if (error.message.includes('your own campaigns')) {
+      statusCode = 403;
+      errorCode = 'NOT_CAMPAIGN_OWNER';
+      message = error.message;
+    } else if (error.message.includes('already exists')) {
+      statusCode = 409;
+      errorCode = 'DUPLICATE_ASSIGNMENT';
+      message = error.message;
     }
 
     return res.status(statusCode).json({
@@ -968,6 +1113,133 @@ exports.getVolunteerHoursNew = async (req, res) => {
         code: errorCode,
         message,
       },
+      statusCode,
+    });
+  }
+};
+
+/**
+ * GET /volunteers/me/assignments
+ * List the current user's volunteer assignments (their invite inbox).
+ * Query params: status (requested|accepted|in_progress|completed|cancelled|rejected)
+ */
+exports.listMyAssignments = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { status } = req.query;
+
+    const result = await VolunteerService.listVolunteerAssignments(userId, { status });
+
+    return res.status(200).json({
+      success: true,
+      volunteer_id: result.volunteer_id,
+      assignments: result.assignments,
+    });
+  } catch (error) {
+    winstonLogger.error('Error listing volunteer assignments', {
+      error: error.message,
+      userId: req.user.id,
+    });
+    return res.status(500).json({
+      success: false,
+      error: { code: 'ASSIGNMENT_LIST_ERROR', message: 'Failed to list assignments' },
+      statusCode: 500,
+    });
+  }
+};
+
+/**
+ * GET /volunteers/me/sent-assignments
+ * List assignments the current user has sent as a campaign owner/employer.
+ * Query params: status, campaign_id
+ */
+exports.listSentAssignments = async (req, res) => {
+  try {
+    const creatorId = req.user.id;
+    const { status, campaign_id } = req.query;
+
+    const result = await VolunteerService.listCreatorAssignments(creatorId, { status, campaign_id });
+
+    return res.status(200).json({
+      success: true,
+      assignments: result.assignments,
+    });
+  } catch (error) {
+    winstonLogger.error('Error listing sent assignments', {
+      error: error.message,
+      creatorId: req.user.id,
+    });
+    return res.status(500).json({
+      success: false,
+      error: { code: 'ASSIGNMENT_LIST_ERROR', message: 'Failed to list sent assignments' },
+      statusCode: 500,
+    });
+  }
+};
+
+/**
+ * POST /volunteers/:id/decline
+ * Volunteer declines an assignment invite (requested -> rejected)
+ * Body: { assignment_id, reason }
+ */
+exports.declineAssignmentNew = async (req, res) => {
+  try {
+    const { id: volunteerId } = req.params;
+    const { assignment_id: assignmentId, reason } = req.body;
+    const userId = req.user.id;
+
+    // Verify user owns this volunteer profile
+    const volunteer = await VolunteerProfile.findById(volunteerId);
+    if (!volunteer || volunteer.user_id.toString() !== userId) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'UNAUTHORIZED',
+          message: 'Not authorized to decline assignments for this volunteer',
+        },
+        statusCode: 403,
+      });
+    }
+
+    const assignment = await VolunteerService.declineAssignment(assignmentId, volunteerId, reason);
+
+    return res.status(200).json({
+      success: true,
+      assignment: {
+        id: assignment._id,
+        status: assignment.status,
+        rejection_reason: assignment.rejection_reason,
+      },
+      message: 'Assignment declined',
+    });
+  } catch (error) {
+    winstonLogger.error('Error declining assignment', {
+      error: error.message,
+      volunteerId: req.params.id,
+      assignmentId: req.body.assignment_id,
+    });
+
+    let statusCode = 500;
+    let errorCode = 'ASSIGNMENT_ERROR';
+    let message = 'Failed to decline assignment';
+
+    if (error.message.includes('not found')) {
+      statusCode = 404;
+      errorCode = 'ASSIGNMENT_NOT_FOUND';
+      message = 'Assignment not found';
+    } else if (error.message.includes('Can only reject')) {
+      statusCode = 409;
+      errorCode = 'INVALID_STATUS';
+      message = error.message;
+    } else if (error.message.includes('Unauthorized')) {
+      statusCode = 403;
+      errorCode = 'UNAUTHORIZED';
+      message = error.message;
+    }
+
+    return res.status(statusCode).json({
+      success: false,
+      error: { code: errorCode, message },
       statusCode,
     });
   }

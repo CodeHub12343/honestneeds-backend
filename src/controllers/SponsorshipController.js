@@ -14,6 +14,7 @@
 
 const stripe = require('stripe')(process.env.STRIPE_API_KEY);
 const Sponsorship = require('../models/Sponsorship');
+const BusinessProfile = require('../models/BusinessProfile');
 const { findTierById } = require('../config/sponsorshipTiers');
 const { calculateSponsorshipFees, generateAdminTasks } = require('../utils/feeEngine');
 const logger = require('../utils/winstonLogger');
@@ -45,6 +46,27 @@ class SponsorshipController {
         });
       }
 
+      // ── Resolve owning user + business profile (BU-03 analytics link) ──
+      // The route uses optional auth, so req.user may be absent for guest
+      // checkout. An explicit body.businessId always wins when valid; otherwise
+      // we fall back to the authenticated user's own business profile.
+      const userId = req.user?.id || null;
+      let businessId = null;
+      if (req.body.businessId) {
+        const explicit = await BusinessProfile.findOne({ _id: req.body.businessId, deleted_at: null });
+        if (!explicit) {
+          return res.status(400).json({
+            success: false,
+            error: 'INVALID_BUSINESS',
+            message: `Business profile "${req.body.businessId}" does not exist`,
+          });
+        }
+        businessId = explicit._id;
+      } else if (userId) {
+        const ownProfile = await BusinessProfile.findOne({ user_id: userId, deleted_at: null });
+        if (ownProfile) businessId = ownProfile._id;
+      }
+
       // ── Calculate fees via centralised engine ──
       const { platformFee, netAmount } = calculateSponsorshipFees(tier.price);
 
@@ -61,6 +83,8 @@ class SponsorshipController {
 
       // ── Persist with pending_payment status ──
       const sponsorship = await Sponsorship.create({
+        userId,
+        businessId,
         tierId: tier.id,
         tierName: tier.name,
         grossAmount: tier.price,
@@ -187,6 +211,20 @@ class SponsorshipController {
       sponsorship.activatedAt = new Date();
 
       await sponsorship.save();
+
+      // ── Sync denormalised business profile stats (best-effort) ──
+      // grossAmount is stored in dollars; the profile counter is in cents.
+      if (sponsorship.businessId) {
+        BusinessProfile.updateOne(
+          { _id: sponsorship.businessId },
+          {
+            $inc: {
+              'stats.sponsorships_count': 1,
+              'stats.total_sponsored_cents': Math.round((sponsorship.grossAmount || 0) * 100),
+            },
+          }
+        ).catch((err) => logger.warn('Failed to sync business profile sponsorship stats', { message: err.message }));
+      }
 
       logger.info('✅ Sponsorship onboarded & activated', {
         sponsorshipId: sponsorship._id,

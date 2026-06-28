@@ -223,7 +223,13 @@ const sendWelcomeEmail = async (email, displayName) => {
  */
 const sendDonationConfirmationEmail = async (email, donationData) => {
   try {
-    const { campaignTitle, amount, donorName, transactionId } = donationData;
+    const { campaignTitle, amount, donorName, transactionId, taxDeductible = false, taxId = null } = donationData;
+
+    // CE-6 / U-8: only claim deductibility when the campaign is a verified
+    // tax-exempt recipient; otherwise state plainly that it is not deductible.
+    const deductibilityHtml = taxDeductible
+      ? `<p style="font-size:13px;color:#15803d;"><strong>Tax-deductible:</strong> This donation may be tax-deductible${taxId ? ` (Tax ID: ${taxId})` : ''}. No goods or services were provided in exchange. Consult your tax advisor.</p>`
+      : `<p style="font-size:13px;color:#64748b;">This is a peer-to-peer gift and is generally <strong>not</strong> tax-deductible.</p>`;
     
     const mailOptions = {
       from: process.env.SENDER_EMAIL || 'noreply@honestneed.com',
@@ -257,8 +263,9 @@ const sendDonationConfirmationEmail = async (email, donationData) => {
                   <p><strong>Amount:</strong> $${(amount / 100).toFixed(2)}</p>
                   <p><strong>Transaction ID:</strong> ${transactionId}</p>
                   <p><strong>Date:</strong> ${new Date().toLocaleDateString()}</p>
+                  ${deductibilityHtml}
                 </div>
-                
+
                 <p>Your contribution will make a real difference. Keep an eye on the campaign page to see the impact of your generosity.</p>
                 
                 <p>
@@ -300,8 +307,94 @@ const sendDonationConfirmationEmail = async (email, donationData) => {
   }
 };
 
+/**
+ * Send a "new message" notification email.
+ * Best-effort: failures are logged but never thrown.
+ *
+ * @param {string} email - Recipient's email address
+ * @param {Object} data
+ * @param {string} [data.recipientName] - Recipient display name
+ * @param {string} data.senderName - Sender display name
+ * @param {string} data.preview - Short preview of the message body
+ * @param {string} data.conversationId - Human-readable conversation id (for the link)
+ */
+const sendNewMessageEmail = async (email, data) => {
+  try {
+    const { recipientName, senderName, preview, conversationId } = data;
+    const baseUrl = process.env.FRONTEND_URL || 'https://honestneed.com';
+    const conversationLink = `${baseUrl}/messages/${conversationId}`;
+
+    const mailOptions = {
+      from: process.env.SENDER_EMAIL || 'noreply@honestneed.com',
+      to: email,
+      subject: `New message from ${senderName} - HonestNeed`,
+      html: `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <style>
+              body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+              .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+              .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; text-align: center; border-radius: 5px 5px 0 0; }
+              .content { background: #f9f9f9; padding: 20px; border-radius: 0 0 5px 5px; }
+              .preview { background: white; padding: 15px; border-left: 4px solid #667eea; margin: 20px 0; font-style: italic; }
+              .button { display: inline-block; background: #667eea; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; margin-top: 10px; }
+              .footer { text-align: center; margin-top: 20px; font-size: 12px; color: #999; }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <div class="header">
+                <h1>You have a new message</h1>
+              </div>
+              <div class="content">
+                <p>Hi ${recipientName || 'there'},</p>
+                <p><strong>${senderName}</strong> sent you a message on HonestNeed:</p>
+                <div class="preview">${preview}</div>
+                <a class="button" href="${conversationLink}">View &amp; Reply</a>
+                <p style="margin-top: 20px;">
+                  Best regards,<br>
+                  The HonestNeed Team
+                </p>
+              </div>
+              <div class="footer">
+                <p>&copy; 2026 HonestNeed. All rights reserved.</p>
+                <p>You can manage message notifications in your account settings.</p>
+              </div>
+            </div>
+          </body>
+        </html>
+      `,
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+
+    logger.info('New message email sent', {
+      email,
+      conversationId,
+      messageId: info.messageId,
+    });
+
+    return {
+      success: true,
+      messageId: info.messageId,
+    };
+  } catch (error) {
+    logger.warn('Failed to send new message email', {
+      email,
+      error: error.message,
+    });
+
+    return {
+      success: false,
+      error: error.message,
+    };
+  }
+};
+
 module.exports = {
   sendPasswordResetEmail,
   sendWelcomeEmail,
   sendDonationConfirmationEmail,
+  sendNewMessageEmail,
 };

@@ -120,6 +120,17 @@ const CampaignController = {
           }
         }
 
+        // Phase A (trust-based): Share-to-Earn activates immediately, so the
+        // creator must accept the agreement to pay sharers directly.
+        const consent = req.body.payout_consent;
+        const consentAccepted =
+          consent === true || consent === 'true' || consent === '1' || consent === 'on';
+        if (!consentAccepted) {
+          errors.push(
+            'You must accept the agreement to pay sharers directly (payout_consent) to enable Share-to-Earn'
+          );
+        }
+
         if (errors.length > 0) {
           winstonLogger.warn('❌ Campaign Create Handler: Sharing campaign validation failed', {
             userId,
@@ -245,6 +256,8 @@ const CampaignController = {
       const userId = req.query.userId || null;
       const search = req.query.search || null;
       const sort = req.query.sort || 'trending';
+      // CA-14: Geographic scope filter (local | national | global | all)
+      const geographicScope = req.query.geographicScope || req.query.scope || null;
 
       // Calculate skip for database query
       const skip = (page - 1) * limit;
@@ -254,6 +267,7 @@ const CampaignController = {
         userId,
         status,
         needType,
+        geographicScope,
         search,
         sort,
         skip,
@@ -374,6 +388,22 @@ const CampaignController = {
       // Call service to get campaign
       const campaign = await CampaignService.getCampaign(id, userId);
 
+      // Phase 5 (trust-based Share-to-Earn): attach the creator's reliability
+      // score so the campaign page + share CTA can show "pays sharers reliably".
+      // Non-fatal — never fail a campaign load over a reputation lookup.
+      try {
+        const creatorId = campaign?.creator_id || campaign?.creator?._id;
+        if (creatorId) {
+          const CreatorReliabilityService = require('../services/CreatorReliabilityService');
+          campaign.creator_reliability = await CreatorReliabilityService.getScoreForCreator(creatorId);
+        }
+      } catch (relErr) {
+        winstonLogger.warn('getDetail: creator reliability lookup failed (non-fatal)', {
+          error: relErr.message,
+          campaignId: id,
+        });
+      }
+
       // Return 200 with full campaign data
       res.status(200).json({
         success: true,
@@ -488,6 +518,76 @@ const CampaignController = {
    * 
    * Note: Sets status = 'archived' / is_deleted = true
    */
+  // CA-20 / G-7: Upload one Transformation Journey image (creator). The upload
+  // middleware streams the file (field `image`) to Cloudinary and sets
+  // req.file.image_url. Returns the URL for the editor to attach to an entry.
+  // POST /campaigns/:id/journey/image
+  async uploadJourneyImage(req, res) {
+    try {
+      const { id } = req.params;
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ success: false, message: 'Unauthorized: User ID is required' });
+      }
+      const imageUrl = req.file?.image_url;
+      if (!imageUrl) {
+        return res.status(400).json({ success: false, message: 'An image file is required (form field "image")' });
+      }
+      const Campaign = require('../models/Campaign');
+      const campaign = await Campaign.findByIdOrCampaignId(id);
+      if (!campaign || campaign.is_deleted) {
+        return res.status(404).json({ success: false, message: 'Campaign not found' });
+      }
+      if (!campaign.isOwnedBy(userId)) {
+        return res.status(403).json({ success: false, message: 'You do not own this campaign' });
+      }
+      return res.status(200).json({ success: true, data: { image_url: imageUrl } });
+    } catch (error) {
+      winstonLogger.error('uploadJourneyImage error', { error: error.message, campaignId: req.params.id });
+      return res.status(500).json({ success: false, message: error.message || 'Failed to upload image' });
+    }
+  },
+
+  // CA-20 / G-7: Replace a campaign's transformation journey (creator).
+  // PUT /campaigns/:id/journey  Body: { entries: [...] }
+  async updateTransformationJourney(req, res) {
+    try {
+      const { id } = req.params;
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ success: false, message: 'Unauthorized: User ID is required' });
+      }
+      const entries = req.body?.entries ?? req.body?.transformation_journey ?? [];
+      const campaign = await CampaignService.updateTransformationJourney(id, userId, entries);
+      return res.status(200).json({ success: true, data: campaign });
+    } catch (error) {
+      return res.status(error.statusCode || 500).json({
+        success: false,
+        message: error.message || 'Failed to update transformation journey',
+      });
+    }
+  },
+
+  // CE-1: Get campaign edit history (creator or admin).
+  // GET /campaigns/:id/edit-history
+  async getEditHistory(req, res) {
+    try {
+      const { id } = req.params;
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ success: false, message: 'Unauthorized: User ID is required' });
+      }
+      const isAdmin = !!(req.user?.is_admin || req.user?.roles?.includes('admin'));
+      const history = await CampaignService.getEditHistory(id, userId, isAdmin);
+      return res.status(200).json({ success: true, data: history });
+    } catch (error) {
+      return res.status(error.statusCode || 500).json({
+        success: false,
+        message: error.message || 'Failed to retrieve edit history',
+      });
+    }
+  },
+
   async delete(req, res, next) {
     try {
       const { id } = req.params;
@@ -964,11 +1064,56 @@ const CampaignController = {
 
   /**
    * Get campaign statistics
+   * G-8 / CA-11: Generate (or fetch) the campaign's QR code.
+   * GET /campaigns/:id/qr
+   * Public — the QR encodes the public campaign URL. Persists qr_code_url so it
+   * is reused (idempotent). Returns the stored URL + a data URL for preview.
+   */
+  async generateQRCode(req, res) {
+    try {
+      const { id } = req.params;
+      const Campaign = require('../models/Campaign');
+      const qrCodeService = require('../services/qrCodeService');
+
+      const campaign = await Campaign.findByIdOrCampaignId(id);
+      if (!campaign || campaign.is_deleted) {
+        return res.status(404).json({ success: false, message: 'Campaign not found' });
+      }
+
+      const result = await qrCodeService.generate(campaign._id.toString(), {
+        size: req.query.size ? parseInt(req.query.size, 10) : undefined,
+      });
+
+      // Persist the hosted URL for reuse (flyers, emails, etc.).
+      if (result.url && campaign.qr_code_url !== result.url) {
+        campaign.qr_code_url = result.url;
+        await campaign.save();
+      }
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          campaign_id: campaign.campaign_id,
+          qr_code_url: result.url || campaign.qr_code_url || null,
+          data_url: result.dataUrl || null,
+          generated_at: result.generatedAt || new Date().toISOString(),
+        },
+      });
+    } catch (error) {
+      winstonLogger.error('generateQRCode error', { error: error.message, campaignId: req.params.id });
+      return res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to generate QR code',
+      });
+    }
+  },
+
+  /**
    * GET /campaigns/:id/stats
-   * 
+   *
    * Path Params:
    * - id: Campaign ID
-   * 
+   *
    * Returns: 200 with campaign statistics
    */
   async getStats(req, res, next) {
@@ -2346,7 +2491,7 @@ const CampaignController = {
       const Campaign = require('../models/Campaign');
 
       // Verify campaign exists
-      const campaign = await Campaign.findById(id);
+      const campaign = await Campaign.findByIdOrCampaignId(id);
       if (!campaign) {
         return res.status(404).json({
           success: false,
@@ -2521,7 +2666,7 @@ const CampaignController = {
       const Campaign = require('../models/Campaign');
 
       // Verify campaign exists
-      const campaign = await Campaign.findById(id);
+      const campaign = await Campaign.findByIdOrCampaignId(id);
       if (!campaign) {
         return res.status(404).json({
           success: false,

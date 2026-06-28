@@ -11,6 +11,7 @@
  */
 
 const ConversionTrackingService = require('../services/ConversionTrackingService');
+const ReferralUrlService = require('../services/ReferralUrlService');
 const winstonLogger = require('../utils/winstonLogger');
 
 /**
@@ -168,19 +169,32 @@ const recordReferralClick = async (req, res) => {
       ...result,
     });
   } catch (error) {
-    const statusCode = error.statusCode || 500;
-    const errorCode = error.code || 'INTERNAL_ERROR';
-
     winstonLogger.error('Error recording referral click', {
       error: error.message,
+      stack: error.stack,
       campaignId: req.body?.campaignId,
       referralCode: req.body?.referralCode?.substring(0, 10),
     });
 
-    return res.status(statusCode).json({
-      success: false,
-      error: errorCode,
-      message: error.message || 'Failed to record referral click',
+    // Client validation errors (4xx) are surfaced; everything else degrades
+    // gracefully. Click tracking is NON-CRITICAL analytics — the actual reward
+    // attribution happens at donation time (the donation carries the referral
+    // code), and the client already stored the code in sessionStorage. A logging
+    // failure must never break the visitor's page load with a 500.
+    const statusCode = error.statusCode || 500;
+    if (statusCode >= 400 && statusCode < 500) {
+      return res.status(statusCode).json({
+        success: false,
+        error: error.code || 'INVALID_REQUEST',
+        message: error.message || 'Failed to record referral click',
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Campaign accessed (click tracking deferred)',
+      shareFound: false,
+      tracked: false,
     });
   }
 };

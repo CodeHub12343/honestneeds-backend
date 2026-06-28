@@ -18,6 +18,7 @@ const notificationSchema = new mongoose.Schema(
     type: {
       type: String,
       enum: [
+        // Prayer support
         'someone_prayed',
         'new_text_prayer',
         'new_voice_prayer',
@@ -26,10 +27,67 @@ const notificationSchema = new mongoose.Schema(
         'prayer_rejected',
         'prayer_flagged',
         'prayer_milestone',
+        // Campaign lifecycle
         'goal_reached',
-        'donation_received',
+        'milestone_reached',
         'campaign_activated',
         'campaign_ended',
+        'campaign_paused',
+        // Donations & sponsorships
+        'donation_received',
+        'donation_made',
+        'sponsorship_received',
+        'sponsorship_approved',
+        // Volunteer
+        'volunteer_hours_verified',
+        'volunteer_badge_earned',
+        'volunteer_request',
+        'volunteer_assignment_invited',
+        'volunteer_assignment_accepted',
+        'volunteer_assignment_declined',
+        'volunteer_assignment_completed',
+        'volunteer_assignment_reviewed',
+        // Hope Responder ("Need Now")
+        'hope_responder_accepted',
+        'hope_responder_on_the_way',
+        'hope_responder_arrived',
+        // Business volunteer opportunities (BU-06)
+        'opportunity_application_received',
+        'opportunity_application_accepted',
+        'opportunity_application_rejected',
+        'opportunity_application_completed',
+        'opportunity_application_withdrawn',
+        // Business giveaways (BU-07)
+        'giveaway_entry_received',
+        'giveaway_won',
+        'giveaway_claimed',
+        'giveaway_fulfilled',
+        // Comments / social
+        'comment_received',
+        'comment_reply',
+        // Share-to-earn
+        'share_reward_owed',
+        'share_reward_approved',
+        'share_reward_rejected',
+        'referral_converted',
+        // Daily share-limit / extra-share requests
+        'share_extra_requested',
+        'share_extra_approved',
+        'share_extra_denied',
+        // Payouts
+        'payout_requested',
+        'payout_sent',
+        'payout_received',
+        'payout_reminder',
+        'payout_cancelled',
+        'payout_disputed',
+        // Gamification
+        'badge_earned',
+        'level_up',
+        'streak_milestone',
+        'leaderboard_rank',
+        // Messaging & system
+        'new_message',
         'system_alert',
         'admin_message',
       ],
@@ -51,6 +109,7 @@ const notificationSchema = new mongoose.Schema(
     data: {
       prayer_id: mongoose.Schema.Types.ObjectId,
       campaign_id: mongoose.Schema.Types.ObjectId,
+      conversation_id: mongoose.Schema.Types.ObjectId,
       user_id: mongoose.Schema.Types.ObjectId,
       prayer_type: String,
       supporter_name: String,

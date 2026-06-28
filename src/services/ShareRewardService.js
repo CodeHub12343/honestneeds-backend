@@ -3,22 +3,42 @@
  * Handles conversion attribution pipeline
  * Links share events to donations and creates hold transactions
  *
- * Flow:
+ * Flow (trust-based model, 2026-06-22):
  * 1. Supporter clicks share link with referral code
  * 2. Supporter donates to campaign
- * 3. Donation is verified by admin
+ * 3. Donation is verified
  * 4. ShareRewardService.processShareConversion() is called
- * 5. Reward is created as pending_hold transaction (30-day hold)
- * 6. After 30 days, reward moves to approved/available balance
+ * 5. Reward is created as an 'owed' transaction — immediately claimable, NO
+ *    30-day money hold (the platform never escrows these funds)
+ * 6. The campaign creator settles the sharer directly when they request a
+ *    payout; the reward then moves 'owed' → 'paid'
  */
 
 const mongoose = require('mongoose');
 const Transaction = require('../models/Transaction');
 const Campaign = require('../models/Campaign');
-const Share = require('../models/Share');
+// NOTE: models/Share exports { ShareRecord, ShareBudgetReload } — the share documents
+// live in ShareRecord. The previous `const Share = require('../models/Share')` made
+// Share.findOne undefined, so every conversion threw. Use ShareRecord directly.
+const { ShareRecord } = require('../models/Share');
 const User = require('../models/User');
 const ReferralTracking = require('../models/ReferralTracking');
 const winstonLogger = require('../utils/winstonLogger');
+
+// ── Anti-fraud thresholds (configurable; production-safe defaults) ──
+// These guard against reward farming, but hard-coded they also silently drop
+// legitimate conversions in dev/test. Override via env to relax while testing:
+//   SHARE_MIN_DONATION_MULTIPLIER=1   (don't require donation ≥ 10× reward)
+//   SHARE_MIN_ACCOUNT_AGE_HOURS=0     (don't require sharer account ≥ 24h old)
+// Min donation = amount_per_share × this multiplier (ensures a donation is worth
+// more than the reward it pays out, so the creator never pays out at a loss).
+const MIN_DONATION_MULTIPLIER = Number.isFinite(Number(process.env.SHARE_MIN_DONATION_MULTIPLIER))
+  ? Number(process.env.SHARE_MIN_DONATION_MULTIPLIER)
+  : 10;
+// Minimum sharer account age (hours) before their referrals earn — anti-bot.
+const MIN_ACCOUNT_AGE_HOURS = Number.isFinite(Number(process.env.SHARE_MIN_ACCOUNT_AGE_HOURS))
+  ? Number(process.env.SHARE_MIN_ACCOUNT_AGE_HOURS)
+  : 24;
 
 class ShareRewardService {
   /**
@@ -58,7 +78,7 @@ class ShareRewardService {
       // ===== STEP 1: Validate Share Record =====
 
       // Find share record by referral code
-      const shareRecord = await Share.findOne({ referral_code: referralCode });
+      const shareRecord = await ShareRecord.findOne({ referral_code: referralCode });
 
       if (!shareRecord) {
         winstonLogger.warn('⚠️ ShareRewardService: Share record not found for referral code', {
@@ -101,6 +121,57 @@ class ShareRewardService {
         shareRecord.conversions = 0;
       }
 
+      // ===== SELF-REFERRAL GUARD (PRD business rule) =====
+      // Sharers cannot earn from their own donations.
+      if (supporterId && shareRecord.supporter_id.toString() === supporterId.toString()) {
+        winstonLogger.warn('⚠️ ShareRewardService: Self-referral blocked', {
+          referralCode,
+          sharerId: shareRecord.supporter_id,
+          donorId: supporterId,
+        });
+        return {
+          success: true,
+          reward_created: false,
+          reason: 'Self-referral not eligible for reward',
+        };
+      }
+
+      // ===== DAILY SHARE-LIMIT GUARD (client rule, 2026-06) =====
+      // A sharer earns a tip from only ONE reward-eligible share per campaign per
+      // day (plus creator-approved extras). Over-quota same-day shares are
+      // recorded as FREE shares (reward_eligible:false) so they still drive
+      // traffic but never pay out. A conversion on a free share earns nothing.
+      // Legacy shares predate the field (undefined) and stay eligible.
+      if (shareRecord.reward_eligible === false) {
+        winstonLogger.info('📊 ShareRewardService: Share is not reward-eligible (daily limit / free share)', {
+          referralCode,
+          shareId: shareRecord.share_id,
+        });
+        return {
+          success: true,
+          reward_created: false,
+          reason: 'Share was a free (non-reward-eligible) share — over the daily tip limit',
+        };
+      }
+
+      // ===== IDEMPOTENCY GUARD =====
+      // If a reward already exists for this donation, do not create another.
+      const existingReward = await Transaction.findOne({
+        transaction_type: 'share_reward',
+        related_donation_id: donationTransactionId,
+      });
+      if (existingReward) {
+        winstonLogger.info('ℹ️ ShareRewardService: Reward already exists for this donation', {
+          donationTransactionId,
+          existingRewardId: existingReward._id,
+        });
+        return {
+          success: true,
+          reward_created: false,
+          reason: 'Reward already processed for this donation',
+        };
+      }
+
       // ===== STEP 3: Get Campaign & Verify Share Config =====
 
       const campaign = await Campaign.findById(campaignId);
@@ -117,33 +188,38 @@ class ShareRewardService {
         };
       }
 
-      // Verify campaign is sharing type
-      if (campaign.campaign_type !== 'sharing') {
-        winstonLogger.warn('⚠️ ShareRewardService: Campaign is not sharing type', {
-          campaignId,
-          campaignType: campaign.campaign_type,
-          referralCode,
-        });
-        return {
-          success: true,
-          reward_created: false,
-          reason: 'Campaign is not a sharing campaign',
-        };
-      }
+      // SR-1: Share-to-Earn is a FEATURE FLAG, not a campaign type. Any campaign
+      // that has funded & activated paid sharing pays rewards on converting
+      // referrals — including a fundraising campaign that turned the feature on.
+      // Eligibility is therefore decided entirely by `share_config`
+      // (is_paid_sharing_active + funded budget) below — NOT by `campaign_type`.
 
       // Get share config
       const shareConfig = campaign.share_config || {
         is_paid_sharing_active: false,
-        current_budget_remaining: 0,
+        committed_budget_remaining: 0,
+        committed_total: 0,
         amount_per_share: 0,
       };
+
+      // Trust-based model: spend against the declared liability pool
+      // (committed_budget_remaining). Derive it for any legacy (escrow-era)
+      // config that predates the field.
+      if (shareConfig.committed_budget_remaining === undefined) {
+        shareConfig.committed_budget_remaining = Math.max(
+          0,
+          (shareConfig.total_budget || 0) - (shareConfig.committed_total || 0)
+        );
+      }
+      if (shareConfig.committed_total === undefined) shareConfig.committed_total = 0;
 
       winstonLogger.info('📊 ShareRewardService: Campaign share config retrieved', {
         campaignId,
         shareConfig: {
           is_paid_sharing_active: shareConfig.is_paid_sharing_active,
           total_budget: shareConfig.total_budget,
-          current_budget_remaining: shareConfig.current_budget_remaining,
+          committed_budget_remaining: shareConfig.committed_budget_remaining,
+          committed_total: shareConfig.committed_total,
           amount_per_share: shareConfig.amount_per_share,
         },
       });
@@ -164,12 +240,12 @@ class ShareRewardService {
         };
       }
 
-      // Check if budget remaining is sufficient
-      if (shareConfig.current_budget_remaining < shareConfig.amount_per_share) {
+      // Check if budget remaining is sufficient (declared liability pool)
+      if (shareConfig.committed_budget_remaining < shareConfig.amount_per_share) {
         winstonLogger.info('📊 ShareRewardService: Insufficient budget for reward', {
           campaignId,
           referralCode,
-          current_budget_remaining: shareConfig.current_budget_remaining,
+          committed_budget_remaining: shareConfig.committed_budget_remaining,
           amount_per_share: shareConfig.amount_per_share,
         });
         return {
@@ -181,41 +257,42 @@ class ShareRewardService {
 
       // ===== ANTI-FRAUD CHECKS =====
 
-      // Check 1: Donation amount vs reward amount
-      // Donation should be at least 10x the reward (to prevent artificially low donations)
-      const minDonationAmount = shareConfig.amount_per_share * 10;
-      if (amountCents < minDonationAmount) {
+      // Check 1: Donation amount vs reward amount (configurable; 0/<=1 disables).
+      const minDonationAmount = shareConfig.amount_per_share * MIN_DONATION_MULTIPLIER;
+      if (MIN_DONATION_MULTIPLIER > 0 && amountCents < minDonationAmount) {
         winstonLogger.warn('⚠️ ShareRewardService: Fraud check - donation too small vs reward', {
           campaignId,
           referralCode,
           donationAmount: amountCents,
           rewardAmount: shareConfig.amount_per_share,
           minRequired: minDonationAmount,
+          multiplier: MIN_DONATION_MULTIPLIER,
         });
         return {
           success: true,
           reward_created: false,
-          reason: 'Donation amount too small relative to reward (fraud protection)',
+          reason: `Donation amount too small relative to reward (needs ≥ ${MIN_DONATION_MULTIPLIER}× the $${(shareConfig.amount_per_share / 100).toFixed(2)} reward)`,
         };
       }
 
-      // Check 2: Account age verification
-      const sharer = await User.findById(shareRecord.supporter_id);
-      if (sharer) {
-        const accountAgeMs = Date.now() - sharer.created_at.getTime();
-        const accountAgeHours = accountAgeMs / (1000 * 60 * 60);
-
-        if (accountAgeHours < 24) {
-          winstonLogger.warn('⚠️ ShareRewardService: Fraud check - account too new', {
-            campaignId,
-            supporterId: shareRecord.supporter_id,
-            accountAgeHours: accountAgeHours.toFixed(1),
-          });
-          return {
-            success: true,
-            reward_created: false,
-            reason: 'Sharer account too new (fraud protection)',
-          };
+      // Check 2: Account age verification (configurable; 0 disables).
+      if (MIN_ACCOUNT_AGE_HOURS > 0) {
+        const sharer = await User.findById(shareRecord.supporter_id);
+        if (sharer) {
+          const accountAgeHours = (Date.now() - sharer.created_at.getTime()) / (1000 * 60 * 60);
+          if (accountAgeHours < MIN_ACCOUNT_AGE_HOURS) {
+            winstonLogger.warn('⚠️ ShareRewardService: Fraud check - account too new', {
+              campaignId,
+              supporterId: shareRecord.supporter_id,
+              accountAgeHours: accountAgeHours.toFixed(1),
+              minRequired: MIN_ACCOUNT_AGE_HOURS,
+            });
+            return {
+              success: true,
+              reward_created: false,
+              reason: 'Sharer account too new (fraud protection)',
+            };
+          }
         }
       }
 
@@ -228,10 +305,9 @@ class ShareRewardService {
         rewardDollars: (shareConfig.amount_per_share / 100).toFixed(2),
       });
 
-      // Calculate hold until date (30 days from now)
-      const holdUntilDate = new Date();
-      holdUntilDate.setDate(holdUntilDate.getDate() + 30);
-
+      // Trust-based model: the reward is OWED to the sharer immediately — no
+      // 30-day money hold (the platform never escrows these funds). The creator
+      // settles it directly when the sharer requests a payout.
       const rewardTransaction = new Transaction({
         campaign_id: campaignId,
         supporter_id: shareRecord.supporter_id,
@@ -240,10 +316,8 @@ class ShareRewardService {
         amount_cents: shareConfig.amount_per_share,
         platform_fee_cents: 0, // No platform fee on rewards
         net_amount_cents: shareConfig.amount_per_share,
-        payment_method: 'internal_wallet', // Reward deposited to internal wallet
-        status: 'pending_hold', // NEW STATUS for 30-day hold
-        hold_until_date: holdUntilDate,
-        hold_reason: 'Standard 30-day hold for share rewards (fraud verification)',
+        payment_method: 'internal_wallet', // Settled off-platform by the creator
+        status: 'owed', // Immediately claimable; creator pays directly
         related_donation_id: donationTransactionId,
         related_share_id: shareRecord._id,
         ip_address: shareRecord.ip_address,
@@ -262,8 +336,7 @@ class ShareRewardService {
       winstonLogger.info('✅ ShareRewardService: Reward transaction created', {
         transactionId: rewardTransaction._id,
         rewardAmount: shareConfig.amount_per_share,
-        holdUntilDate: holdUntilDate.toISOString(),
-        status: 'pending_hold',
+        status: 'owed',
       });
 
       // ===== STEP 6: Update Share Record & ReferralTracking =====
@@ -354,19 +427,24 @@ class ShareRewardService {
 
       // ===== STEP 7: Update Campaign Metrics & Budget =====
 
-      // Deduct from share config budget
-      shareConfig.current_budget_remaining -= shareConfig.amount_per_share;
+      // Trust-based accounting: draw down the declared liability pool and grow
+      // the cumulative-accrued counter.
+      shareConfig.committed_budget_remaining -= shareConfig.amount_per_share;
+      shareConfig.committed_total = (shareConfig.committed_total || 0) + shareConfig.amount_per_share;
       shareConfig.last_config_update = new Date();
 
-      // Auto-disable if budget depleted
-      if (shareConfig.current_budget_remaining <= 0) {
+      // Auto-pause when the pool can no longer cover another reward.
+      if (shareConfig.committed_budget_remaining < shareConfig.amount_per_share) {
         shareConfig.is_paid_sharing_active = false;
-        shareConfig.current_budget_remaining = 0;
+        if (shareConfig.committed_budget_remaining < 0) {
+          shareConfig.committed_budget_remaining = 0;
+        }
 
-        winstonLogger.info('⚠️ ShareRewardService: Share budget depleted - disabling paid sharing', {
+        winstonLogger.info('⚠️ ShareRewardService: Share budget exhausted - pausing paid sharing', {
           campaignId,
           totalBudget: shareConfig.total_budget,
-          spentAmount: shareConfig.total_budget - shareConfig.current_budget_remaining,
+          committedTotal: shareConfig.committed_total,
+          committedBudgetRemaining: shareConfig.committed_budget_remaining,
         });
       }
 
@@ -378,13 +456,14 @@ class ShareRewardService {
           $inc: {
             'metrics.shares_paid': 1,
             'metrics.conversions_from_shares': 1,
+            // Owed-but-unpaid liability the creator must settle.
             'metrics.total_share_rewards_pending': shareConfig.amount_per_share,
           },
           $push: {
             'metrics.share_reward_transactions': {
               reward_transaction_id: rewardTransaction._id,
               amount_cents: shareConfig.amount_per_share,
-              hold_until_date: holdUntilDate,
+              status: 'owed',
               created_at: new Date(),
             },
           },
@@ -394,7 +473,8 @@ class ShareRewardService {
 
       winstonLogger.info('✅ ShareRewardService: Campaign metrics and budget updated', {
         campaignId,
-        newBudgetRemaining: shareConfig.current_budget_remaining,
+        newBudgetRemaining: shareConfig.committed_budget_remaining,
+        committedTotal: shareConfig.committed_total,
         isPaidSharingActive: shareConfig.is_paid_sharing_active,
       });
 
@@ -413,11 +493,40 @@ class ShareRewardService {
         donation_amount: amountCents,
         reward_amount: shareConfig.amount_per_share,
         transaction_id: rewardTransaction._id,
-        reward_status: 'pending_hold',
-        hold_until_date: holdUntilDate.toISOString(),
+        reward_status: 'owed',
       };
 
       winstonLogger.info('📢 ShareRewardService: Emitting conversion event', event);
+
+      // ===== STEP 9: Notify the sharer their reward is owed =====
+      // Trust-based: the reward is owed immediately (no hold) and the creator
+      // pays directly when the sharer requests a payout. Non-fatal.
+      try {
+        const NotificationDispatcher = require('./NotificationDispatcher');
+        await NotificationDispatcher.notify({
+          userId: shareRecord.supporter_id,
+          type: 'share_reward_owed',
+          data: {
+            campaign_id: campaignId,
+            campaign_title: campaign.title,
+            amount_cents: shareConfig.amount_per_share,
+            reward_transaction_id: rewardTransaction._id,
+            channel: shareRecord.channel,
+          },
+          overrides: {
+            title: '🎉 You earned a share reward',
+            message: `Your share of "${campaign.title}" converted — $${(shareConfig.amount_per_share / 100).toFixed(2)} is now owed to you. Request a payout anytime; the creator pays you directly.`,
+            action_url: '/shares',
+            icon_emoji: '🎉',
+            color: 'success',
+          },
+        });
+      } catch (notifyErr) {
+        winstonLogger.error('⚠️ ShareRewardService: reward-owed notification failed (non-fatal)', {
+          error: notifyErr.message,
+          campaignId,
+        });
+      }
 
       // ===== RETURN SUCCESS =====
 
@@ -428,13 +537,11 @@ class ShareRewardService {
           transaction_id: rewardTransaction._id,
           amount_cents: shareConfig.amount_per_share,
           amount_dollars: (shareConfig.amount_per_share / 100).toFixed(2),
-          status: 'pending_hold',
-          hold_until_date: holdUntilDate.toISOString(),
-          hold_days_remaining: 30,
+          status: 'owed',
           share_id: shareRecord.share_id,
           channel: shareRecord.channel,
         },
-        message: `Share reward of $${(shareConfig.amount_per_share / 100).toFixed(2)} created. Subject to 30-day hold for fraud verification.`,
+        message: `Share reward of $${(shareConfig.amount_per_share / 100).toFixed(2)} is now owed to the sharer. The creator pays it directly when the sharer requests a payout.`,
       };
     } catch (error) {
       winstonLogger.error('❌ ShareRewardService.processShareConversion error', {
@@ -459,7 +566,7 @@ class ShareRewardService {
    */
   static async getConversionStats(campaignId) {
     try {
-      const shares = await Share.find({ campaign_id: campaignId });
+      const shares = await ShareRecord.find({ campaign_id: campaignId });
 
       const totalShares = shares.length;
       const sharesWithConversions = shares.filter((s) => s.conversions && s.conversions > 0)
@@ -507,19 +614,20 @@ class ShareRewardService {
    */
   static async getPendingRewards(userId) {
     try {
+      // Trust-based: "pending" now means OWED-but-not-yet-paid (no money hold).
+      // 'pending_hold' kept for back-compat with pre-pivot rewards still on hold.
       const pendingRewards = await Transaction.find({
         supporter_id: userId,
         transaction_type: 'share_reward',
-        status: 'pending_hold',
+        status: { $in: ['owed', 'pending_hold'] },
       }).populate(['campaign_id', 'related_share_id']);
 
-      // Calculate days remaining on each hold
       const now = new Date();
       const rewards = pendingRewards.map((tx) => {
-        const daysRemaining = Math.max(
-          0,
-          Math.ceil((tx.hold_until_date - now) / (1000 * 60 * 60 * 24))
-        );
+        // Legacy holds still expose remaining days; trust-based 'owed' is claimable now (0).
+        const daysRemaining = tx.hold_until_date
+          ? Math.max(0, Math.ceil((tx.hold_until_date - now) / (1000 * 60 * 60 * 24)))
+          : 0;
         return {
           transaction_id: tx._id,
           amount_cents: tx.amount_cents,
@@ -527,7 +635,8 @@ class ShareRewardService {
           campaign: tx.campaign_id.title,
           channel: tx.related_share_id?.channel,
           created_at: tx.created_at,
-          hold_until_date: tx.hold_until_date,
+          status: tx.status,
+          hold_until_date: tx.hold_until_date || null,
           days_remaining: daysRemaining,
         };
       });

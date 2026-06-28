@@ -16,7 +16,8 @@ const { winstonLogger } = require('../utils/logger');
 class StripeBoostService {
   /**
    * Define boost tiers with pricing and visibility weights
-   * Must match frontend BOOST_TIERS in honestneed-frontend/utils/boostValidationSchemas.ts
+   * Must match frontend BOOST_TIERS in utils/boostValidationSchemas.ts
+   * Only two plans are offered: Free ($0) and Pro ($20).
    */
   static BOOST_TIERS = {
     free: {
@@ -24,28 +25,14 @@ class StripeBoostService {
       price_cents: 0,
       visibility_weight: 1,
       duration_days: 30,
-      features: ['Basic visibility', '30-day duration', 'Limited support'],
-    },
-    basic: {
-      tier_name: 'Basic Boost',
-      price_cents: 999, // $9.99
-      visibility_weight: 5,
-      duration_days: 30,
-      features: ['5x visibility multiplier', '30-day duration', 'Email support', 'Basic analytics'],
+      features: ['Standard placement', '30-day duration', '1x visibility'],
     },
     pro: {
-      tier_name: 'Pro Boost',
-      price_cents: 2499, // $24.99
-      visibility_weight: 15,
+      tier_name: 'Campaign Boost',
+      price_cents: 2000, // $20.00
+      visibility_weight: 10,
       duration_days: 30,
-      features: ['15x visibility multiplier', '30-day duration', 'Priority support', 'Advanced analytics', 'Trending badge'],
-    },
-    premium: {
-      tier_name: 'Premium Boost',
-      price_cents: 9999, // $99.99
-      visibility_weight: 50,
-      duration_days: 30,
-      features: ['50x visibility multiplier', '30-day duration', '24/7 priority support', 'Full analytics suite', 'Priority badge', 'Featured placement'],
+      features: ['10x visibility multiplier', '30-day duration', 'Featured placement', 'Priority support', 'Boost analytics'],
     },
   };
 
@@ -163,202 +150,26 @@ class StripeBoostService {
   }
 
   /**
-   * Handle Stripe webhook events for boost payments
+   * Log a boost purchase lifecycle event.
+   * Called by the live webhook handler (StripeWebhookHandler) after a boost is
+   * activated. Kept intentionally lightweight and non-throwing: an event-log
+   * failure must never break boost activation.
    *
-   * @param {Object} event - Stripe event object
-   * @returns {Object} Processing result
+   * @param {string} boostId - CampaignBoost id
+   * @param {string} creatorId - Creator user id
+   * @param {string} campaignId - Campaign id
+   * @param {string} tier - Boost tier
+   * @param {string} eventName - Event name (e.g. 'payment_completed')
    */
-  static async handleWebhookEvent(event) {
-    try {
-      switch (event.type) {
-        case 'checkout.session.completed':
-          return await this.handleCheckoutCompleted(event.data.object);
-
-        case 'payment_intent.succeeded':
-          return await this.handlePaymentSucceeded(event.data.object);
-
-        case 'payment_intent.payment_failed':
-          return await this.handlePaymentFailed(event.data.object);
-
-        case 'charge.refunded':
-          return await this.handleRefund(event.data.object);
-
-        default:
-          winstonLogger.info('Unhandled webhook event', { eventType: event.type });
-          return { success: true, message: 'Event noted but not processed' };
-      }
-    } catch (error) {
-      winstonLogger.error('Error handling webhook event', {
-        error: error.message,
-        stack: error.stack,
-        eventType: event.type,
-      });
-      throw error;
-    }
-  }
-
-  /**
-   * Process successful checkout
-   *
-   * @param {Object} session - Stripe session object
-   * @returns {Object} Result
-   */
-  static async handleCheckoutCompleted(session) {
-    try {
-      const { campaign_id, creator_id, tier } = session.metadata;
-
-      if (!campaign_id || !tier) {
-        throw new Error('Missing metadata in session');
-      }
-
-      const tierData = this.BOOST_TIERS[tier];
-      const endDate = new Date();
-      endDate.setDate(endDate.getDate() + tierData.duration_days);
-
-      // Create or update boost record
-      let boost = await CampaignBoost.findOne({
-        campaign_id,
-        stripe_session_id: session.id,
-      });
-
-      if (!boost) {
-        boost = new CampaignBoost({
-          campaign_id,
-          creator_id,
-          tier,
-          visibility_weight: tierData.visibility_weight,
-          price_cents: tierData.price_cents,
-          duration_days: tierData.duration_days,
-          end_date: endDate,
-          stripe_payment_id: session.payment_intent,
-          stripe_session_id: session.id,
-          stripe_customer_id: session.customer,
-          payment_status: 'completed',
-          is_active: true,
-        });
-      } else {
-        boost.payment_status = 'completed';
-        boost.is_active = true;
-        boost.stripe_payment_id = session.payment_intent;
-      }
-
-      await boost.save();
-
-      winstonLogger.info('Boost payment completed', {
-        boostId: boost._id,
-        campaignId: campaign_id,
-        tier,
-        amount: tierData.price_cents,
-      });
-
-      return {
-        success: true,
-        boost_id: boost._id,
-        message: 'Boost activated successfully',
-      };
-    } catch (error) {
-      winstonLogger.error('Error handling checkout completion', {
-        error: error.message,
-        stack: error.stack,
-        errorType: error.type,
-      });
-      throw error;
-    }
-  }
-
-  /**
-   * Process successful payment
-   *
-   * @param {Object} paymentIntent - Stripe payment intent
-   * @returns {Object} Result
-   */
-  static async handlePaymentSucceeded(paymentIntent) {
-    try {
-      const sessionId = paymentIntent.metadata?.stripe_session_id;
-
-      if (sessionId) {
-        const session = await stripe.checkout.sessions.retrieve(sessionId);
-        return await this.handleCheckoutCompleted(session);
-      }
-
-      return { success: true, message: 'Payment succeeded' };
-    } catch (error) {
-      winstonLogger.error('Error handling payment success', {
-        error: error.message,
-      });
-      throw error;
-    }
-  }
-
-  /**
-   * Process failed payment
-   *
-   * @param {Object} paymentIntent - Stripe payment intent
-   * @returns {Object} Result
-   */
-  static async handlePaymentFailed(paymentIntent) {
-    try {
-      const { campaign_id } = paymentIntent.metadata || {};
-
-      if (campaign_id) {
-        await CampaignBoost.updateOne(
-          {
-            campaign_id,
-            stripe_payment_id: paymentIntent.id,
-          },
-          {
-            payment_status: 'failed',
-            is_active: false,
-          }
-        );
-
-        winstonLogger.warn('Boost payment failed', {
-          campaignId: campaign_id,
-          paymentIntentId: paymentIntent.id,
-        });
-      }
-
-      return { success: true, message: 'Payment failure recorded' };
-    } catch (error) {
-      winstonLogger.error('Error handling payment failure', {
-        error: error.message,
-      });
-      throw error;
-    }
-  }
-
-  /**
-   * Process refund
-   *
-   * @param {Object} charge - Stripe charge object
-   * @returns {Object} Result
-   */
-  static async handleRefund(charge) {
-    try {
-      const boost = await CampaignBoost.findOne({
-        stripe_payment_id: charge.payment_intent,
-      });
-
-      if (boost) {
-        boost.is_active = false;
-        boost.payment_status = 'cancelled';
-        boost.cancelled_at = new Date();
-        boost.cancellation_reason = 'refunded';
-        await boost.save();
-
-        winstonLogger.info('Boost refunded and deactivated', {
-          boostId: boost._id,
-          campaignId: boost.campaign_id,
-        });
-      }
-
-      return { success: true, message: 'Refund processed' };
-    } catch (error) {
-      winstonLogger.error('Error handling refund', {
-        error: error.message,
-      });
-      throw error;
-    }
+  static async logBoostPurchaseEvent(boostId, creatorId, campaignId, tier, eventName) {
+    winstonLogger.info('Boost purchase event', {
+      event: eventName,
+      boostId,
+      creatorId,
+      campaignId,
+      tier,
+      timestamp: new Date().toISOString(),
+    });
   }
 
   /**

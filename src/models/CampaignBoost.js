@@ -6,9 +6,7 @@ const mongoose = require('mongoose');
  * 
  * Boost Tiers (synced with frontend):
  * - Free: No cost, 1x visibility
- * - Basic: $9.99, 5x visibility
- * - Pro: $24.99, 15x visibility
- * - Premium: $99.99, 50x visibility
+ * - Pro: $20.00, 10x visibility
  */
 
 const campaignBoostSchema = new mongoose.Schema(
@@ -30,7 +28,7 @@ const campaignBoostSchema = new mongoose.Schema(
     // Boost Tier
     tier: {
       type: String,
-      enum: ['free', 'basic', 'pro', 'premium'],
+      enum: ['free', 'pro'],
       default: 'free',
       required: true,
     },
@@ -38,7 +36,7 @@ const campaignBoostSchema = new mongoose.Schema(
     // Visibility Multiplier
     visibility_weight: {
       type: Number,
-      enum: [1, 5, 15, 50],
+      enum: [1, 10],
       default: 1,
       required: true,
     },
@@ -119,6 +117,12 @@ const campaignBoostSchema = new mongoose.Schema(
       default: 0,
     },
     conversions_with_boost: {
+      type: Number,
+      default: 0,
+    },
+    // Real donation revenue (cents) attributed to conversions while this boost
+    // was live. Drives a truthful ROI instead of a hardcoded average.
+    revenue_cents_with_boost: {
       type: Number,
       default: 0,
     },
@@ -204,6 +208,100 @@ campaignBoostSchema.statics.getCreatorActiveBoosts = async function (creatorId) 
     end_date: { $gt: new Date() },
     payment_status: 'completed',
   }).sort({ created_at: -1 });
+};
+
+// Tier ranking weight — free never affects listing rank.
+const RANKING_TIERS = ['pro'];
+
+// Static method: Reconcile a campaign's boost-ranking flags from its boosts.
+// Recomputes Campaign.is_boosted / current_boost_tier / boost_weight from the
+// boosts that are still valid (active, completed, not expired, rank-affecting).
+// Used after a boost is cancelled/expires so stale flags don't keep a campaign
+// pinned to the top of listings. Returns the resolved flags.
+campaignBoostSchema.statics.reconcileCampaignFlags = async function (campaignId) {
+  const Campaign = require('./Campaign');
+
+  const remaining = await this.find({
+    campaign_id: campaignId,
+    is_active: true,
+    payment_status: 'completed',
+    end_date: { $gt: new Date() },
+    tier: { $in: RANKING_TIERS },
+  }).select('tier visibility_weight');
+
+  let flags;
+  if (remaining.length === 0) {
+    flags = { is_boosted: false, current_boost_tier: 'free', boost_weight: 0 };
+  } else {
+    // Highest visibility multiplier wins when multiple boosts overlap.
+    const top = remaining.reduce((a, b) =>
+      b.visibility_weight > a.visibility_weight ? b : a
+    );
+    flags = {
+      is_boosted: true,
+      current_boost_tier: top.tier,
+      boost_weight: top.visibility_weight,
+    };
+  }
+
+  await Campaign.updateOne({ _id: campaignId }, { $set: flags });
+  return flags;
+};
+
+// Static method: Record a tracked performance event against the campaign's
+// currently-live boost. Used to auto-populate the boost dashboard's
+// Views / Engagement / Conversions stats from real platform activity.
+//
+//   eventType : 'view' | 'engagement' | 'conversion'
+//   options   : { revenueCents } — donation amount (cents) for 'conversion'
+//
+// Atomically $inc's the counter on the active, paid-complete, non-expired boost
+// (newest wins if several overlap). Free boosts are tracked too — they appear on
+// the dashboard. Returns the updated boost, or null if the campaign has no live
+// boost (in which case there is nothing to track and the caller can ignore it).
+campaignBoostSchema.statics.recordBoostEvent = async function (
+  campaignId,
+  eventType,
+  options = {}
+) {
+  const FIELD_BY_EVENT = {
+    view: 'views_with_boost',
+    engagement: 'engagement_with_boost',
+    conversion: 'conversions_with_boost',
+  };
+
+  const field = FIELD_BY_EVENT[eventType];
+  if (!field || !campaignId) return null;
+
+  const inc = { [field]: 1 };
+  if (eventType === 'conversion' && options.revenueCents > 0) {
+    inc.revenue_cents_with_boost = options.revenueCents;
+  }
+
+  const boost = await this.findOneAndUpdate(
+    {
+      campaign_id: campaignId,
+      is_active: true,
+      payment_status: 'completed',
+      end_date: { $gt: new Date() },
+    },
+    { $inc: inc },
+    { new: true, sort: { created_at: -1 } }
+  );
+
+  if (!boost) return null;
+
+  // Recompute ROI from real attributed revenue vs. what the boost cost.
+  // Free boosts (price 0) have no meaningful ROI, so leave it at 0.
+  if (eventType === 'conversion' && boost.price_cents > 0) {
+    const revenue = boost.revenue_cents_with_boost || 0;
+    boost.roi_percentage = Math.round(
+      ((revenue - boost.price_cents) / boost.price_cents) * 100
+    );
+    await boost.save();
+  }
+
+  return boost;
 };
 
 // Instance method: Deactivate boost

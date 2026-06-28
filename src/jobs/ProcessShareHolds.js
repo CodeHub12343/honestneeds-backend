@@ -1,11 +1,14 @@
 /**
- * ProcessShareHolds Job
- * 
- * Scheduled background job that processes share reward holds
- * Runs hourly to approve/reject rewards after 30-day hold period
- * 
- * Security: Prevents fraud by holding rewards pending fraud review
- * Fraud checks run automatically after hold period expires
+ * ProcessShareHolds Job — LEGACY DRAIN ONLY (trust-based model, 2026-06-22)
+ *
+ * Under the trust-based Share-to-Earn model, rewards are created as 'owed'
+ * (immediately claimable — there is NO 30-day money hold), so NO new
+ * 'pending_hold' rewards are produced. This job is retained solely to drain any
+ * LEGACY rewards created before the pivot that are still in 'pending_hold':
+ * after their hold expires it clears them to 'approved' (which the earnings
+ * ledger treats as owed/claimable) or rejects them on fraud. On a post-pivot
+ * database it finds nothing and is a harmless no-op. Once no 'pending_hold'
+ * rewards remain, the hourly schedule in app.js can be removed entirely.
  */
 
 const mongoose = require('mongoose');

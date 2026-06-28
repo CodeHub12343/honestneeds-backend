@@ -10,6 +10,7 @@
  */
 
 const Campaign = require('../models/Campaign');
+const feeEngine = require('../utils/feeEngine');
 const CampaignProgress = require('../models/CampaignProgress');
 const winstonLogger = require('../utils/winstonLogger');
 
@@ -725,7 +726,7 @@ class AnalyticsService {
       ]);
 
       const grossAmount = donations[0]?.grossAmount || 0;
-      const platformFee = Math.round(grossAmount * 0.20); // 20% fee
+      const platformFee = feeEngine.calculateDonationFee(grossAmount).feeCents;
       const netAmount = grossAmount - platformFee;
 
       // Get payouts
@@ -841,9 +842,9 @@ class AnalyticsService {
         .populate('supporter_id', 'display_name email')
         .lean();
 
-      // Calculate fee breakdown (20% platform fee)
+      // Calculate fee breakdown via the canonical fee engine (donation rate).
       const totalAmountCents = transactions.reduce((sum, t) => sum + (t.amount_cents || 0), 0);
-      const totalFeeCents = Math.round(totalAmountCents * 0.2); // 20% platform fee
+      const totalFeeCents = feeEngine.calculateDonationFee(totalAmountCents).feeCents;
       const creatorNetCents = totalAmountCents - totalFeeCents;
 
       const feeBreakdown = {

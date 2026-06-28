@@ -244,9 +244,12 @@ app.use('/api/donations', require('./routes/donationRoutes'));
 // app.use('/api/sweepstakes', require('./routes/sweepstakesRoutes'));
 // ✅ NEW: Simplified sweepstakes system (v2) - monthly random drawing
 app.use('/api/sweepstakes', require('./routes/simpleSweepstakesRoutes'));
-app.use('/api/admin', require('./routes/adminUserRoutes'));
-app.use('/api/admin', require('./routes/adminRoutes')); // Comprehensive admin management (17 endpoints)
-app.use('/api/admin/prayers', require('./routes/adminPrayerRoutes')); // Prayer moderation & analytics (10 endpoints)
+// Prayer moderation & analytics (separate feature) — mounted before the
+// general admin router so its more specific prefix matches first.
+app.use('/api/admin/prayers', require('./routes/adminPrayerRoutes'));
+// ✅ Admin System (AD-01..AD-10) — rebuilt from scratch with granular RBAC,
+// per-route permissions, and full audit logging. See src/routes/admin/index.js.
+app.use('/api/admin', require('./routes/admin'));
 app.use('/api/payment-methods', require('./routes/paymentMethodRoutes'));
 app.use('/api/volunteers', require('./routes/volunteerRoutes'));
 app.use('/api/analytics', require('./routes/analyticsRoutes'));
@@ -256,6 +259,16 @@ app.use('/api/share', require('./routes/shareReferralRoutes'));
 app.use('/api/share', require('./routes/sharev2Routes')); // Production-ready sharing endpoints (12 endpoints)
 // ✅ NEW: WebSocket Notifications & Real-time Updates (Phase 4)
 app.use('/api/notifications', require('./routes/notificationRoutes'));
+
+// ✅ NEW: Direct Messaging (1:1 conversations) - MS-01, MS-07, MS-08
+app.use('/api/messages', require('./routes/messageRoutes'));
+
+// ✅ NEW: Trust & Verification (Profile Level 2) - CP-11 / SE-06
+app.use('/api/verification', require('./routes/verificationRoutes'));
+
+// ✅ NEW: AI Subsystem (AI-01..AI-12) - advisor, writer, optimizer, fraud,
+// moderation, recommendations, matchmaking, quests, team builder, coach, viral score
+app.use('/api/ai', require('./routes/aiRoutes'));
 
 // ✅ NEW: Prayer Notification Routes (Phase 5 - Multi-channel notifications)
 app.use('/api/prayers/notifications', require('./routes/prayerNotificationRoutes'));
@@ -271,6 +284,22 @@ app.use('/api/boosts', require('./routes/boostRoutes'));
 
 // ✅ NEW: Sponsorship Routes (tier selection, checkout, onboarding, admin management)
 app.use('/api/sponsorships', require('./routes/sponsorshipRoutes'));
+
+// ✅ NEW: Business Features (BU-01..BU-07)
+// Profiles, directory, analytics, CSR reporting, verification badge.
+app.use('/api/business', require('./routes/businessRoutes'));
+// BU-06 Volunteer opportunity posting + applications.
+app.use('/api/opportunities', require('./routes/opportunityRoutes'));
+// BU-07 Product/service giveaways + claims.
+app.use('/api/giveaways', require('./routes/giveawayRoutes'));
+// VO-08 Hope Responder Program ("Need Now") — enrollment + emergency dispatch.
+app.use('/api/hope-responders', require('./routes/hopeResponderRoutes'));
+
+// ✅ NEW: Rewards & Gamification (RG-02..RG-21)
+// XP/levels/badges, streaks, leaderboards, missions, golden tickets, viral
+// multiplier, hope meter, teams, community challenges, treasure hunts,
+// miracle mode, swipe feed.
+app.use('/api/gamification', require('./routes/gamificationRoutes'));
 
 // ✅ NOTE: Stripe Webhook Routes already registered at the top, before body parsers
 
@@ -311,6 +340,9 @@ const connectDB = async () => {
     logger.info('Connecting to MongoDB...', { uri: mongoUri.replace(/:[^:@]*@/, ':***@') });
     
     await mongoose.connect(mongoUri, {
+      // The connection URI has no database path, so without dbName Mongoose
+      // silently uses the default "test" database. Pin it to MONGODB_DB.
+      dbName: process.env.MONGODB_DB || 'honestneed-dev',
       serverSelectionTimeoutMS: 5000,
       socketTimeoutMS: 10000,
       connectTimeoutMS: 10000,
@@ -383,10 +415,48 @@ const startServer = async () => {
     const { registerPrayerEventHandlers } = require('./events/prayerEventHandlers');
     registerPrayerEventHandlers();
     logger.info('✅ Prayer Support event handlers registered');
+
+    // ✅ NEW: Register Gamification (XP/badges) Event Handlers
+    const { registerGamificationEventHandlers } = require('./events/gamificationEventHandlers');
+    registerGamificationEventHandlers();
+    logger.info('✅ Gamification event handlers registered');
+
+    // ✅ NEW: Register unified Notification Event Handlers (in-app + realtime + email)
+    const { registerNotificationEventHandlers } = require('./events/notificationEventHandlers');
+    registerNotificationEventHandlers();
+    logger.info('✅ Notification event handlers registered');
+
+    // ✅ FIX: Campaign lifecycle events are emitted on CampaignService's LOCAL
+    // emitter, but the email handlers (campaignEventHandlers) and creator-XP
+    // handlers (gamificationEventHandlers) subscribe to the GLOBAL EventBus —
+    // which nothing bridged, so neither ever fired. Bridge the local emitter
+    // onto the EventBus, then register the email handlers.
+    const EventBusInstance = require('./events/EventBus');
+    const campaignEmitter = require('./services/CampaignService').getEventEmitter();
+    ['campaign:created', 'campaign:published', 'campaign:updated', 'campaign:paused', 'campaign:completed'].forEach(
+      (evt) => {
+        campaignEmitter.on(evt, (data) => {
+          EventBusInstance.publishEvent(evt, data).catch((err) =>
+            logger.error('Campaign event bridge failed', { evt, error: err.message })
+          );
+        });
+      }
+    );
+    require('./events/campaignEventHandlers').registerAll();
+    logger.info('✅ Campaign lifecycle email handlers registered (bridged local emitter → EventBus)');
+
+    // ✅ NEW: Seed default RG-18 missions (idempotent)
+    try {
+      const MissionService = require('./services/MissionService');
+      await MissionService.seedDefaultMissions();
+    } catch (error) {
+      logger.error('Failed to seed default missions', { error: error.message });
+    }
     
     // Initialize background jobs
     const ProcessShareHoldsJob = require('./jobs/ProcessShareHolds');
     const CompleteExpiredCampaignsJob = require('./jobs/CompleteExpiredCampaigns');
+    const ExpireBoostsJob = require('./jobs/ExpireBoosts');
     const { executeMontlyDrawing } = require('./jobs/sweepstakesDrawing');
     const cron = require('node-cron');
     
@@ -416,6 +486,21 @@ const startServer = async () => {
 
     logger.info('📅 CompleteExpiredCampaigns job scheduled to run daily at midnight UTC');
 
+    // Schedule ExpireBoosts job to run hourly — deactivates expired boosts and
+    // clears Campaign.is_boosted/current_boost_tier so expired campaigns stop
+    // ranking at the top of listings.
+    const expireBoostsJob = cron.schedule('0 * * * *', async () => {
+      logger.info('⏰ Starting scheduled ExpireBoosts job');
+      try {
+        const result = await ExpireBoostsJob.run();
+        logger.info('✅ ExpireBoosts job completed', result);
+      } catch (error) {
+        logger.error('❌ ExpireBoosts job failed', { error: error.message });
+      }
+    });
+
+    logger.info('📅 ExpireBoosts job scheduled to run hourly');
+
     // ✅ NEW: Schedule sweepstakes drawing job to run monthly (1st of month at 2 AM UTC)
     const sweepstakesDrawingJob = cron.schedule('0 2 1 * *', async () => {
       logger.info('⏰ Starting scheduled sweepstakes drawing job');
@@ -428,7 +513,36 @@ const startServer = async () => {
     });
 
     logger.info('📅 Sweepstakes drawing job scheduled to run monthly (1st of month at 2 AM UTC)');
-    
+
+    // ✅ NEW: RG-08/20/21 Community challenge lifecycle tick (activate scheduled,
+    // complete & award expired). Runs every 15 minutes.
+    const challengeStatusJob = cron.schedule('*/15 * * * *', async () => {
+      try {
+        const CommunityChallengeService = require('./services/CommunityChallengeService');
+        const result = await CommunityChallengeService.refreshStatuses();
+        if (result.activated || result.completed) {
+          logger.info('✅ Community challenge statuses refreshed', result);
+        }
+      } catch (error) {
+        logger.error('❌ Community challenge refresh failed', { error: error.message });
+      }
+    });
+    logger.info('📅 Community challenge lifecycle job scheduled (every 15 minutes)');
+
+    // F-4: Payout reminders — nudge creators with unpaid sharer claims (and
+    // optionally auto-cancel long-unpaid claims). Runs every 6 hours.
+    const PayoutRemindersJob = require('./jobs/PayoutReminders');
+    const payoutRemindersJob = cron.schedule('0 */6 * * *', async () => {
+      logger.info('⏰ Starting scheduled PayoutReminders job');
+      try {
+        const result = await PayoutRemindersJob.run();
+        logger.info('✅ PayoutReminders job completed', result);
+      } catch (error) {
+        logger.error('❌ PayoutReminders job failed', { error: error.message });
+      }
+    });
+    logger.info('📅 PayoutReminders job scheduled (every 6 hours)');
+
     // ✅ CHANGED: Use server.listen instead of app.listen for WebSocket support
     server.listen(PORT, () => {
       logger.info(`HonestNeed API starting on port ${PORT}`);

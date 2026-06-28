@@ -672,6 +672,182 @@ class ShareController {
   }
 
   /**
+   * GET /sharer/rewards
+   * Sharer rewards dashboard: summary + verified/pending reward lists.
+   * Matches the frontend dashboard contract.
+   */
+  static async getSharerRewards(req, res) {
+    try {
+      const userId = req.user._id;
+      const data = await ShareService.getSharerRewardsDashboard(userId);
+      return res.status(200).json({ success: true, data });
+    } catch (error) {
+      console.error('❌ [ShareController] getSharerRewards error:', error);
+      return res.status(error.statusCode || 500).json({
+        success: false,
+        error: error.code || 'INTERNAL_ERROR',
+        message: error.message || 'Failed to fetch sharer rewards',
+      });
+    }
+  }
+
+  /**
+   * POST /sharer/payout-requests
+   * Frontend-friendly alias for requesting a share payout.
+   * Accepts { amount_cents, payout_method } and forwards to requestSharePayout.
+   */
+  static async createSharerPayoutRequest(req, res) {
+    // Normalize the dashboard's body shape into requestSharePayout's expected shape.
+    // C-1: the canonical contract now passes a saved payment_method_id so the
+    // creator receives real payout details. payout_method/paymentMethod is kept
+    // only as a soft hint for picking among the sharer's saved methods.
+    const {
+      amount_cents, amountCents,
+      payout_method, paymentMethod,
+      payment_method_id, paymentMethodId,
+    } = req.body;
+    req.body = {
+      amountCents: amountCents || amount_cents,
+      paymentMethodId: paymentMethodId || payment_method_id || null,
+      // Optional type hint only — never used to fabricate a payment method.
+      methodTypeHint: paymentMethod || payout_method || null,
+    };
+    return ShareController.requestSharePayout(req, res);
+  }
+
+  /**
+   * F-3: Sharer payout timeline.
+   * GET /sharer/payouts
+   * The sharer's payout claims with per-campaign slices, so they can see exactly
+   * which creators have paid and which are still pending.
+   */
+  static async getSharerPayouts(req, res) {
+    try {
+      const ShareWithdrawal = require('../models/ShareWithdrawal');
+      const Campaign = require('../models/Campaign');
+      const userId = req.user._id;
+
+      const withdrawals = await ShareWithdrawal.find({ user_id: userId })
+        .sort({ requested_at: -1 })
+        .lean();
+
+      const campIds = [
+        ...new Set(
+          withdrawals.flatMap((w) =>
+            (w.campaign_withdrawals || []).map((cw) => cw.campaign_id?.toString()).filter(Boolean)
+          )
+        ),
+      ];
+      const camps = await Campaign.find({ _id: { $in: campIds } })
+        .select('title creator_id creator_name')
+        .lean();
+      const campById = {};
+      camps.forEach((c) => { campById[c._id.toString()] = c; });
+
+      const items = withdrawals.map((w) => ({
+        withdrawal_id: w.withdrawal_id,
+        status: w.status,
+        amount: (w.amount_requested || 0) / 100,
+        requested_at: w.requested_at,
+        payment_type: w.payment_type,
+        slices: (w.campaign_withdrawals || []).map((cw) => {
+          const c = campById[cw.campaign_id?.toString()] || {};
+          return {
+            campaign_id: cw.campaign_id,
+            campaign_title: c.title || 'Campaign',
+            creator_name: c.creator_name || 'Creator',
+            amount: (cw.amount_cents || 0) / 100,
+            status: cw.status || 'pending', // pending | paid | cancelled
+            requested_at: w.requested_at,
+            paid_at: cw.paid_at || null,
+            received_at: cw.received_at || null,
+            cancelled_at: cw.cancelled_at || null,
+            reference: cw.transaction_reference || null,
+            proof_url: cw.payment_proof_url || null,
+          };
+        }),
+      }));
+
+      return res.status(200).json({ success: true, data: { items } });
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to load payouts',
+      });
+    }
+  }
+
+  /**
+   * F-3: Sharer confirms they received a specific campaign's payment.
+   * POST /sharer/payouts/:withdrawalId/campaigns/:campaignId/received
+   */
+  static async confirmPayoutReceived(req, res) {
+    try {
+      const ShareWithdrawal = require('../models/ShareWithdrawal');
+      const NotificationDispatcher = require('../services/NotificationDispatcher');
+      const userId = req.user._id;
+      const { withdrawalId, campaignId } = req.params;
+
+      const w = await ShareWithdrawal.findOne({ withdrawal_id: withdrawalId, user_id: userId });
+      if (!w) {
+        return res.status(404).json({ success: false, message: 'Payout not found' });
+      }
+      const slice = (w.campaign_withdrawals || []).find(
+        (cw) => cw.campaign_id?.toString() === campaignId
+      );
+      if (!slice) {
+        return res.status(404).json({ success: false, message: 'No payout slice for that campaign' });
+      }
+      if (slice.status !== 'paid') {
+        return res.status(400).json({ success: false, message: 'You can only confirm a slice that has been paid' });
+      }
+      if (slice.received_at) {
+        return res.status(400).json({ success: false, message: 'Already confirmed as received' });
+      }
+
+      slice.received_at = new Date();
+      await w.save();
+
+      // Phase 5: confirmed receipt strengthens the creator's reliability signal.
+      if (slice.paid_by) {
+        try {
+          const CreatorReliabilityService = require('../services/CreatorReliabilityService');
+          await CreatorReliabilityService.recordReceived(slice.paid_by);
+        } catch (_) { /* non-fatal */ }
+      }
+
+      // Notify the creator who paid that the sharer confirmed receipt.
+      if (slice.paid_by) {
+        try {
+          await NotificationDispatcher.notify({
+            userId: slice.paid_by,
+            type: 'payout_received',
+            data: {
+              campaign_id: slice.campaign_id,
+              amount_cents: slice.amount_cents,
+              withdrawal_id: w.withdrawal_id,
+            },
+            overrides: {
+              title: '✅ Payout confirmed received',
+              message: `A sharer confirmed receiving their $${(slice.amount_cents / 100).toFixed(2)} payment.`,
+              action_url: '/sharers-payouts',
+              icon_emoji: '✅',
+              color: 'success',
+            },
+          });
+        } catch (_) { /* non-fatal */ }
+      }
+
+      return res.status(200).json({ success: true, data: { received_at: slice.received_at } });
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to confirm receipt',
+      });
+    }
+  }
+
+  /**
    * POST /share/join
    * Join share program for a campaign (alias for recordShare)
    */
@@ -867,11 +1043,11 @@ class ShareController {
       }
 
       // Amount should be in cents
-      if (!Number.isInteger(amount) || amount < 1000) { // Minimum $10
+      if (!Number.isInteger(amount) || amount < 500) { // Minimum $5 — unified with /wallet/withdrawals
         return res.status(400).json({
           success: false,
           error: 'INVALID_AMOUNT',
-          message: 'Minimum withdrawal is 1000 cents ($10)'
+          message: 'Minimum withdrawal is 500 cents ($5)'
         });
       }
 
@@ -1835,9 +2011,9 @@ class ShareController {
         });
       }
 
-      const { amountCents, paymentMethod, accountDetails, purpose } = req.body;
+      const { amountCents, paymentMethodId: bodyPaymentMethodId, methodTypeHint } = req.body;
 
-      // Validate input
+      // Validate amount
       if (!amountCents || amountCents <= 0) {
         return res.status(400).json({
           success: false,
@@ -1845,32 +2021,87 @@ class ShareController {
         });
       }
 
-      if (!paymentMethod) {
+      // Enforce minimum withdrawal threshold ($5) — unified with /wallet/withdrawals
+      // (WithdrawalController) so sharers see one consistent minimum across both
+      // payout surfaces (/shares and /dashboard/share-rewards).
+      const MIN_WITHDRAWAL_CENTS = 500;
+      if (amountCents < MIN_WITHDRAWAL_CENTS) {
         return res.status(400).json({
           success: false,
-          message: 'Payment method is required',
+          message: `Minimum withdrawal is $${(MIN_WITHDRAWAL_CENTS / 100).toFixed(2)}`,
         });
       }
 
-      const validMethods = ['bank_transfer', 'paypal', 'stripe', 'check', 'check_mail'];
-      if (!validMethods.includes(paymentMethod)) {
+      // C-1/C-2: resolve a REAL saved payment method the user already owns. We no
+      // longer fabricate a payment method from a free-text type string — that
+      // produced payout records with EMPTY payout details (so creators had nothing
+      // to pay to) and crashed (500) on types outside the PaymentMethod enum, e.g.
+      // 'paypal'. The sharer must have a saved, usable method on file.
+      const SUPPORTED_TYPES = ['bank_transfer', 'mobile_money', 'stripe'];
+      const usableFilter = {
+        user_id: userId,
+        deleted_at: null,
+        status: { $in: ['active', 'pending_verification'] },
+      };
+
+      let paymentMethodDoc = null;
+      if (bodyPaymentMethodId) {
+        // Canonical path: an explicit saved method was chosen.
+        if (!/^[0-9a-fA-F]{24}$/.test(String(bodyPaymentMethodId))) {
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_PAYMENT_METHOD_ID',
+            message: 'Invalid payout method selection.',
+          });
+        }
+        paymentMethodDoc = await PaymentMethod.findOne({ _id: bodyPaymentMethodId, ...usableFilter });
+        if (!paymentMethodDoc) {
+          return res.status(400).json({
+            success: false,
+            code: 'PAYMENT_METHOD_NOT_FOUND',
+            message:
+              'That payout method was not found, is not yours, or is no longer usable. Pick another or add one in Settings.',
+          });
+        }
+      } else {
+        // Back-compat: no id sent. Pick the best saved method — primary first,
+        // then the hinted type, then the most recently added usable method.
+        const candidates = await PaymentMethod.find(usableFilter).sort({ is_primary: -1, created_at: -1 });
+        if (methodTypeHint && SUPPORTED_TYPES.includes(methodTypeHint)) {
+          paymentMethodDoc =
+            candidates.find((m) => m.is_primary && m.type === methodTypeHint) ||
+            candidates.find((m) => m.type === methodTypeHint) ||
+            candidates[0] ||
+            null;
+        } else {
+          paymentMethodDoc = candidates[0] || null;
+        }
+      }
+
+      if (!paymentMethodDoc) {
         return res.status(400).json({
           success: false,
-          message: `Invalid payment method. Allowed: ${validMethods.join(', ')}`,
+          code: 'NO_PAYOUT_METHOD',
+          message:
+            'Add a payout method in Settings before requesting a payout, so creators know where to send your money.',
+        });
+      }
+      if (!SUPPORTED_TYPES.includes(paymentMethodDoc.type)) {
+        return res.status(400).json({
+          success: false,
+          code: 'UNSUPPORTED_PAYOUT_METHOD',
+          message: `Payout method type "${paymentMethodDoc.type}" is not supported for payouts.`,
         });
       }
 
-      if (!accountDetails || Object.keys(accountDetails).length === 0) {
-        return res.status(400).json({
-          success: false,
-          message: 'Account details are required for payout',
-        });
-      }
+      const paymentMethodId = paymentMethodDoc._id;
+      const resolvedMethodType = paymentMethodDoc.type;
 
       winstonLogger.info('💸 requestSharePayout: Processing payout request', {
         userId,
         amountCents,
-        paymentMethod,
+        paymentMethodId,
+        type: resolvedMethodType,
       });
 
       // Check if user has sufficient earnings
@@ -1885,63 +2116,6 @@ class ShareController {
           availableEarningsCents: availableEarnings,
           availableEarningsDollars: (availableEarnings / 100).toFixed(2),
         });
-      }
-
-      // Create or find payment method
-      let paymentMethodId;
-      try {
-        // First, try to find existing payment method of this type
-        let existingPaymentMethod = await PaymentMethod.findOne({
-          user_id: userId,
-          type: paymentMethod,
-          status: 'active',
-        });
-
-        if (existingPaymentMethod) {
-          winstonLogger.info('✓ Using existing payment method', {
-            paymentMethodId: existingPaymentMethod._id,
-            type: paymentMethod,
-          });
-          paymentMethodId = existingPaymentMethod._id;
-        } else {
-          // Create new payment method from account details
-          const newPaymentMethod = await PaymentMethod.create({
-            user_id: userId,
-            type: paymentMethod,
-            provider: 'manual',
-            status: 'active',
-            verification_status: 'verified',
-            // Bank transfer fields
-            bank_account_holder: accountDetails.accountHolder || null,
-            bank_name: accountDetails.bankName || null,
-            bank_account_type: accountDetails.accountType || null,
-            bank_account_last_four: accountDetails.last4 || null,
-            bank_routing_number_last_four: accountDetails.routingNumberLast4 || null,
-            // Mobile money fields
-            mobile_money_provider: accountDetails.mobileProvider || null,
-            mobile_number: accountDetails.mobileNumber || null,
-            mobile_country_code: accountDetails.countryCode || null,
-            // Stripe fields
-            stripe_payment_method_id: accountDetails.stripePaymentMethodId || null,
-            card_last_four: accountDetails.cardLast4 || null,
-            card_brand: accountDetails.cardBrand || null,
-            // PayPal
-            stripe_customer_id: accountDetails.paypalEmail || null,
-          });
-
-          winstonLogger.info('✓ Created new payment method', {
-            paymentMethodId: newPaymentMethod._id,
-            type: paymentMethod,
-          });
-          paymentMethodId = newPaymentMethod._id;
-        }
-      } catch (paymentMethodError) {
-        winstonLogger.error('❌ Error creating/finding payment method', {
-          error: paymentMethodError.message,
-          userId,
-          paymentMethod,
-        });
-        throw paymentMethodError;
       }
 
       // Create payout request with payment method ID
@@ -1959,9 +2133,10 @@ class ShareController {
           paymentMethodId,
         });
 
-        // Estimate payout date (3-5 business days)
+        // Estimate "by" date — manual model, so this is only indicative: the
+        // actual payout depends on each campaign creator settling directly.
         const estimatedPayoutDate = new Date();
-        estimatedPayoutDate.setDate(estimatedPayoutDate.getDate() + (paymentMethod === 'check_mail' ? 7 : 5));
+        estimatedPayoutDate.setDate(estimatedPayoutDate.getDate() + 5);
 
         return res.status(201).json({
           success: true,
@@ -1971,7 +2146,8 @@ class ShareController {
             userId: userId.toString(),
             amountCents: amountCents,
             amountDollars: (amountCents / 100).toFixed(2),
-            paymentMethod: paymentMethod,
+            paymentMethod: resolvedMethodType,
+            paymentMethodId: paymentMethodId.toString(),
             status: 'pending',
             requestedAt: new Date().toISOString(),
             estimatedPayoutDate: estimatedPayoutDate.toISOString(),
@@ -1979,6 +2155,22 @@ class ShareController {
           },
         });
       } catch (serviceError) {
+        // H-2: a balance shortfall is a clean 409, not a 500. The allocator
+        // returns the true claimable figure so the message matches the dashboard.
+        if (serviceError.code === 'INSUFFICIENT_ALLOCATABLE') {
+          winstonLogger.info('requestSharePayout: insufficient allocatable balance', {
+            userId,
+            allocatableCents: serviceError.allocatable_cents,
+          });
+          return res.status(409).json({
+            success: false,
+            code: 'INSUFFICIENT_ALLOCATABLE',
+            message: serviceError.message,
+            allocatableCents: serviceError.allocatable_cents,
+            allocatableDollars: ((serviceError.allocatable_cents || 0) / 100).toFixed(2),
+          });
+        }
+
         winstonLogger.error('❌ requestSharePayout: Service error', {
           userId,
           error: serviceError.message,
@@ -2003,6 +2195,164 @@ class ShareController {
         success: false,
         message: 'Failed to process payout request',
         error: error.message,
+      });
+    }
+  }
+
+  /**
+   * ===== DAILY SHARE LIMIT + EXTRA-SHARE REQUESTS (client rule, 2026-06) =====
+   */
+
+  /**
+   * GET /campaigns/:campaignId/share/eligibility
+   * The authenticated user's current daily tip-eligibility for this campaign:
+   * whether the next share earns a tip, how many tip-eligible shares remain
+   * today, and whether they already have a pending extra-share request.
+   */
+  static async getShareEligibility(req, res) {
+    try {
+      const { campaignId } = req.params;
+      const ShareGrantService = require('../services/ShareGrantService');
+      const status = await ShareGrantService.getDailyStatus(campaignId, req.user._id);
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          reward_eligible_used: status.reward_eligible_used,
+          quota_today: status.quota,
+          base_quota: status.base_quota,
+          granted_slots: status.granted_slots,
+          remaining_reward_shares: status.remaining_reward_shares,
+          next_share_reward_eligible: status.next_share_reward_eligible,
+          can_request_more: !status.next_share_reward_eligible && !status.has_pending_request,
+          has_pending_request: status.has_pending_request,
+        },
+      });
+    } catch (error) {
+      const statusCode = error.statusCode || 500;
+      return res.status(statusCode).json({
+        success: false,
+        error: error.code || 'INTERNAL_ERROR',
+        message: error.message || 'Failed to fetch share eligibility',
+      });
+    }
+  }
+
+  /**
+   * POST /campaigns/:campaignId/share/extra-request
+   * Sharer asks the creator to allow another tip-eligible share today.
+   * Body: { reason (required), channel? }
+   */
+  static async requestExtraShare(req, res) {
+    try {
+      const { campaignId } = req.params;
+      const { reason, channel } = req.body;
+      const ShareGrantService = require('../services/ShareGrantService');
+
+      const data = await ShareGrantService.requestExtraShare({
+        campaignId,
+        requesterId: req.user._id,
+        reason,
+        channel,
+      });
+
+      return res.status(201).json({ success: true, data });
+    } catch (error) {
+      const statusCode = error.statusCode || 500;
+      return res.status(statusCode).json({
+        success: false,
+        error: error.code || 'INTERNAL_ERROR',
+        message: error.message || 'Failed to submit extra-share request',
+      });
+    }
+  }
+
+  /**
+   * GET /campaigns/:campaignId/share/extra-requests
+   * Creator inbox: extra-share requests for one of THEIR campaigns.
+   * Query: status (default 'pending'), page, limit
+   */
+  static async listCampaignExtraShareRequests(req, res) {
+    try {
+      const { campaignId } = req.params;
+      const { status = 'pending', page = 1, limit = 20 } = req.query;
+
+      // Only the campaign creator may view its request inbox.
+      const campaign = await Campaign.findById(campaignId).select('creator_id');
+      if (!campaign) {
+        return res.status(404).json({ success: false, error: 'CAMPAIGN_NOT_FOUND', message: 'Campaign does not exist' });
+      }
+      if (campaign.creator_id.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+        return res.status(403).json({ success: false, error: 'FORBIDDEN', message: 'Only the campaign creator can view share requests' });
+      }
+
+      const ShareGrantService = require('../services/ShareGrantService');
+      const data = await ShareGrantService.listForCampaign(campaignId, { status, page, limit });
+
+      return res.status(200).json({ success: true, ...data });
+    } catch (error) {
+      const statusCode = error.statusCode || 500;
+      return res.status(statusCode).json({
+        success: false,
+        error: error.code || 'INTERNAL_ERROR',
+        message: error.message || 'Failed to fetch share requests',
+      });
+    }
+  }
+
+  /**
+   * GET /sharer/extra-requests
+   * The authenticated sharer's own extra-share requests.
+   */
+  static async getMyExtraShareRequests(req, res) {
+    try {
+      const { status = 'all', page = 1, limit = 20 } = req.query;
+      const ShareGrantService = require('../services/ShareGrantService');
+      const data = await ShareGrantService.listForUser(req.user._id, { status, page, limit });
+
+      return res.status(200).json({ success: true, ...data });
+    } catch (error) {
+      const statusCode = error.statusCode || 500;
+      return res.status(statusCode).json({
+        success: false,
+        error: error.code || 'INTERNAL_ERROR',
+        message: error.message || 'Failed to fetch your share requests',
+      });
+    }
+  }
+
+  /**
+   * POST /share/extra-requests/:requestId/review
+   * Creator approves or denies a request. Body: { approved (boolean), note? }
+   */
+  static async reviewExtraShareRequest(req, res) {
+    try {
+      const { requestId } = req.params;
+      const { approved, note } = req.body;
+
+      if (typeof approved !== 'boolean') {
+        return res.status(400).json({
+          success: false,
+          error: 'MISSING_REQUIRED_FIELDS',
+          message: 'approved (boolean) is required',
+        });
+      }
+
+      const ShareGrantService = require('../services/ShareGrantService');
+      const data = await ShareGrantService.reviewExtraShare({
+        requestId,
+        reviewerId: req.user._id,
+        approved,
+        note,
+      });
+
+      return res.status(200).json({ success: true, data });
+    } catch (error) {
+      const statusCode = error.statusCode || 500;
+      return res.status(statusCode).json({
+        success: false,
+        error: error.code || 'INTERNAL_ERROR',
+        message: error.message || 'Failed to review share request',
       });
     }
   }

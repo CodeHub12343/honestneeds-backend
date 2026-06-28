@@ -91,9 +91,36 @@ router.get(
 );
 
 /**
+ * GET /donations/fees/statement
+ * CF-3: The authenticated creator's platform-fee statement (what they owe the
+ * platform for confirmed donations, plus settled/reversed history).
+ * MUST come before the `/:transactionId` route to avoid being matched as an id.
+ *
+ * @auth Required (creator)
+ * @returns {200} { owed, settled, refunded, byCampaign }
+ */
+router.get(
+  '/fees/statement',
+  authenticate,
+  DonationController.getCreatorFeeStatement
+);
+
+/**
+ * GET /donations/dashboard
+ * CE-2: Donor dashboard summary (counts/totals by status, open refund requests).
+ * MUST come before the `/:transactionId` route.
+ * @auth Required
+ */
+router.get(
+  '/dashboard',
+  authenticate,
+  DonationController.getDonorDashboard
+);
+
+/**
  * GET /donations
  * List donations with filtering and pagination
- * 
+ *
  * @auth Required
  * @query page, limit, campaignId, status, paymentMethod, startDate, endDate
  * @returns {200} Paginated donation list
@@ -177,6 +204,30 @@ router.post(
   authenticate,
   refundLimiter, // ✅ NEW: Rate limiting for refund requests
   DonationController.refundDonation
+);
+
+/**
+ * POST /donations/:donationId/refund-request
+ * CE-7: Donor requests a refund on their own donation. Body: { reason }.
+ * @auth Required (the donor)
+ */
+router.post(
+  '/:donationId/refund-request',
+  authenticate,
+  refundLimiter,
+  DonationController.requestRefund
+);
+
+/**
+ * POST /donations/:donationId/refund-request/decide
+ * CE-7: Creator/admin approves or declines a refund request.
+ * Body: { decision: 'approve'|'decline', note? }.
+ * @auth Required (campaign creator or admin)
+ */
+router.post(
+  '/:donationId/refund-request/decide',
+  authenticate,
+  DonationController.decideRefundRequest
 );
 
 /**

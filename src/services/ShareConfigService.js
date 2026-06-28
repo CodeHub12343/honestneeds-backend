@@ -10,8 +10,43 @@ const winstonLogger = require('../utils/winstonLogger');
 const MAX_CONFIG_UPDATE_INCREASE = 1000000; // $10,000 in cents
 const CONFIG_UPDATE_RATE_LIMIT_WINDOW = 3600000; // 1 hour in ms
 const VALID_CHANNELS = ['email', 'facebook', 'twitter', 'instagram', 'linkedin', 'sms', 'whatsapp', 'telegram', 'reddit', 'tiktok', 'other'];
+// DEPRECATED (trust-based model, 2026-06-22): the $100 fundraising-goal floor for
+// enabling share rewards was dropped so activation matches the wizard creation
+// path exactly (reward set + budget covers one reward). Kept for reference only;
+// `getFundraisingGoalCents` remains available as a helper.
+// const MIN_GOAL_TO_ENABLE_REWARDS_CENTS = 10000;
 
 class ShareConfigService {
+  /**
+   * U-5 funding indicator for a share_config. Tells the UI whether sharer
+   * rewards are actually backed by funded money or still just a declared plan.
+   * @param {Object} config - campaign.share_config
+   * @returns {'funded'|'pending_funding'|'depleted'|'inactive'}
+   */
+  static getFundingStatus(config = {}) {
+    // Trust-based model: status reflects the declared liability pool, not escrow.
+    //   inactive  — no reward set yet
+    //   exhausted — pool can't cover one more reward
+    //   active    — covered and turned on
+    //   paused    — covered but creator turned it off
+    const remaining = config.committed_budget_remaining || 0;
+    const perShare = config.amount_per_share || 0;
+    if (!perShare) return 'inactive';
+    if (remaining < perShare) return 'exhausted';
+    return config.is_paid_sharing_active ? 'active' : 'paused';
+  }
+
+  /**
+   * Total fundraising target (in cents) across a campaign's fundraising goals.
+   * @param {Object} campaign
+   * @returns {number}
+   */
+  static getFundraisingGoalCents(campaign) {
+    return (campaign.goals || [])
+      .filter((g) => g.goal_type === 'fundraising')
+      .reduce((sum, g) => sum + (g.target_amount || 0), 0);
+  }
+
   /**
    * Update share configuration for a campaign
    * @param {Object} params - Parameters object
@@ -66,14 +101,24 @@ class ShareConfigService {
         }
       }
 
-      // Initialize current config
+      // Initialize current config (trust-based fields)
       const currentConfig = campaign.share_config || {
         total_budget: 0,
-        current_budget_remaining: 0,
+        committed_budget_remaining: 0,
+        committed_total: 0,
         amount_per_share: 0,
         is_paid_sharing_active: false,
         share_channels: [],
       };
+
+      // Back-compat: derive trust fields for legacy (escrow-era) configs.
+      if (currentConfig.committed_total === undefined) currentConfig.committed_total = 0;
+      if (currentConfig.committed_budget_remaining === undefined) {
+        currentConfig.committed_budget_remaining = Math.max(
+          0,
+          (currentConfig.total_budget || 0) - (currentConfig.committed_total || 0)
+        );
+      }
 
       // Validate and apply totalBudget changes
       if (totalBudget !== undefined) {
@@ -88,24 +133,24 @@ class ShareConfigService {
         // Calculate increase/decrease
         const budgetDifference = totalBudget - (currentConfig.total_budget || 0);
 
-        // Check max increase per update
+        // Check max increase per update (fat-finger guard, not an escrow gate)
         if (budgetDifference > MAX_CONFIG_UPDATE_INCREASE) {
           throw {
             code: 'BUDGET_INCREASE_EXCEEDED',
-            message: `Maximum budget increase per update is $100.00 (${MAX_CONFIG_UPDATE_INCREASE} cents). Requested increase: $${(budgetDifference / 100).toFixed(2)}`,
+            message: `Maximum budget increase per update is $${(MAX_CONFIG_UPDATE_INCREASE / 100).toFixed(2)}. Requested increase: $${(budgetDifference / 100).toFixed(2)}`,
             statusCode: 400,
           };
         }
 
-        // If budget decreased below current remaining, adjust remaining
-        if (totalBudget < currentConfig.current_budget_remaining) {
-          currentConfig.current_budget_remaining = totalBudget;
-        } else if (budgetDifference > 0) {
-          // If budget increased, add difference to remaining
-          currentConfig.current_budget_remaining += budgetDifference;
-        }
-
+        // Trust-based: `total_budget` IS the active declared reward pool. Setting
+        // it directly resizes the liability counter — committed_budget_remaining
+        // = declared pool minus rewards already accrued (committed_total). No
+        // escrow, no reload required.
         currentConfig.total_budget = totalBudget;
+        currentConfig.committed_budget_remaining = Math.max(
+          0,
+          totalBudget - (currentConfig.committed_total || 0)
+        );
       }
 
       // Validate and apply amountPerShare
@@ -127,16 +172,9 @@ class ShareConfigService {
           };
         }
 
+        // Activation is computed centrally below (trust-based), once all fields
+        // are applied — so a combined budget + reward update resolves correctly.
         currentConfig.amount_per_share = amountPerShare;
-
-        // If amount per share is 0, disable paid sharing
-        if (amountPerShare === 0) {
-          currentConfig.is_paid_sharing_active = false;
-        }
-        // If amount per share > 0 and there's budget, enable paid sharing
-        else if (currentConfig.current_budget_remaining > 0 && currentConfig.total_budget > 0) {
-          currentConfig.is_paid_sharing_active = true;
-        }
       }
 
       // Validate and apply shareChannels
@@ -162,10 +200,13 @@ class ShareConfigService {
         currentConfig.share_channels = shareChannels;
       }
 
-      // Ensure auto-disable if budget reaches 0
-      if (currentConfig.current_budget_remaining <= 0) {
-        currentConfig.is_paid_sharing_active = false;
-      }
+      // Trust-based activation (single source of truth): paid sharing is live
+      // whenever a reward is set AND the declared pool covers at least one
+      // reward. Auto-pauses when exhausted. This is the SAME condition the wizard
+      // creation path uses, so all entry points agree (no goal floor, no escrow).
+      currentConfig.is_paid_sharing_active =
+        currentConfig.amount_per_share > 0 &&
+        currentConfig.committed_budget_remaining >= currentConfig.amount_per_share;
 
       // Update timestamps
       currentConfig.last_config_update = new Date();
@@ -187,10 +228,16 @@ class ShareConfigService {
         success: true,
         config: {
           totalBudget: currentConfig.total_budget,
-          currentBudgetRemaining: currentConfig.current_budget_remaining,
+          committedBudgetRemaining: currentConfig.committed_budget_remaining,
+          committedTotal: currentConfig.committed_total || 0,
           amountPerShare: currentConfig.amount_per_share,
           isPaidSharingActive: currentConfig.is_paid_sharing_active,
+          fundingStatus: ShareConfigService.getFundingStatus(currentConfig),
           shareChannels: currentConfig.share_channels,
+          // Back-compat aliases (legacy escrow field names → trust values).
+          declaredBudget: currentConfig.total_budget,
+          fundedBudgetAllocated: currentConfig.total_budget,
+          currentBudgetRemaining: currentConfig.committed_budget_remaining,
         },
         message: 'Share configuration updated successfully',
       };
@@ -223,22 +270,38 @@ class ShareConfigService {
 
       const config = campaign.share_config || {
         total_budget: 0,
-        current_budget_remaining: 0,
+        committed_budget_remaining: 0,
+        committed_total: 0,
         amount_per_share: 0,
         is_paid_sharing_active: false,
         share_channels: [],
       };
 
+      // Derive the liability counter for legacy (escrow-era) configs.
+      const committedRemaining =
+        config.committed_budget_remaining !== undefined
+          ? config.committed_budget_remaining
+          : Math.max(0, (config.total_budget || 0) - (config.committed_total || 0));
+
       return {
         success: true,
         config: {
           totalBudget: config.total_budget,
-          currentBudgetRemaining: config.current_budget_remaining,
+          committedBudgetRemaining: committedRemaining,
+          committedTotal: config.committed_total || 0,
           amountPerShare: config.amount_per_share,
           isPaidSharingActive: config.is_paid_sharing_active,
+          fundingStatus: ShareConfigService.getFundingStatus({
+            ...(typeof config.toObject === 'function' ? config.toObject() : config),
+            committed_budget_remaining: committedRemaining,
+          }),
           shareChannels: config.share_channels,
           lastConfigUpdate: config.last_config_update,
           configUpdatedBy: config.config_updated_by,
+          // Back-compat aliases (legacy escrow field names → trust values).
+          declaredBudget: config.total_budget,
+          fundedBudgetAllocated: config.total_budget,
+          currentBudgetRemaining: committedRemaining,
         },
       };
     } catch (error) {
@@ -278,15 +341,6 @@ class ShareConfigService {
 
       const config = campaign.share_config || {};
 
-      // Can only enable if conditions met
-      if (!config.total_budget || config.total_budget <= 0) {
-        throw {
-          code: 'INSUFFICIENT_BUDGET',
-          message: 'Cannot enable paid sharing without budget allocation',
-          statusCode: 400,
-        };
-      }
-
       if (!config.amount_per_share || config.amount_per_share <= 0) {
         throw {
           code: 'INVALID_AMOUNT_PER_SHARE',
@@ -295,6 +349,23 @@ class ShareConfigService {
         };
       }
 
+      // Trust-based: require the DECLARED pool to cover at least one reward — no
+      // escrow / reload needed. Derive the liability counter for legacy configs.
+      const committedRemaining =
+        config.committed_budget_remaining !== undefined
+          ? config.committed_budget_remaining
+          : Math.max(0, (config.total_budget || 0) - (config.committed_total || 0));
+      if (committedRemaining < config.amount_per_share) {
+        throw {
+          code: 'INSUFFICIENT_BUDGET',
+          message:
+            'Your declared reward budget cannot cover a single reward. Increase the budget to enable paid sharing.',
+          statusCode: 400,
+        };
+      }
+
+      // Persist the derived liability counter so subsequent reads are consistent.
+      campaign.share_config.committed_budget_remaining = committedRemaining;
       campaign.share_config.is_paid_sharing_active = true;
       campaign.share_config.last_config_update = new Date();
       await campaign.save();

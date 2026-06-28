@@ -106,11 +106,25 @@ class ReferralUrlService {
         };
       }
 
+      // Resolve the referrer id safely — supporter_id is populated, but the user
+      // may have been deleted (populate → null). Use a consistent ObjectId in
+      // both the lookup and the new-record creation (the old code mixed the
+      // populated object and ._id, which could cast oddly).
+      const referrerId = shareRecord.supporter_id?._id || shareRecord.supporter_id;
+      const referrerName = shareRecord.supporter_id?.name || null;
+      if (!referrerId) {
+        winstonLogger.warn('Referral click: share has no resolvable referrer', {
+          referralCode: cleanCode,
+          campaignId,
+        });
+        return { success: true, message: 'Campaign accessed', referralCode: cleanCode, shareFound: false };
+      }
+
       // Record the referral visit in ReferralTracking
       let referralTracking = await ReferralTracking.findOne({
         share_id: shareRecord._id,
         campaign_id: campaignId,
-        referrer_id: shareRecord.supporter_id,
+        referrer_id: referrerId,
       });
 
       if (!referralTracking) {
@@ -119,7 +133,7 @@ class ReferralUrlService {
           tracking_id: `RT-${Date.now()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`,
           campaign_id: campaignId,
           share_id: shareRecord._id,
-          referrer_id: shareRecord.supporter_id._id,
+          referrer_id: referrerId,
           referral_visits: [],
           conversions: [],
           total_visits: 0,
@@ -166,11 +180,11 @@ class ReferralUrlService {
         message: 'Referral click recorded',
         trackingId: referralTracking.tracking_id,
         shareId: shareRecord._id,
-        referrerId: shareRecord.supporter_id._id,
-        referrerName: shareRecord.supporter_id.name,
+        referrerId,
+        referrerName,
         totalVisits: referralTracking.total_visits,
         totalConversions: referralTracking.total_conversions,
-        conversionRate: referralTracking.conversion_rate.toFixed(2),
+        conversionRate: Number(referralTracking.conversion_rate || 0).toFixed(2),
       };
     } catch (error) {
       winstonLogger.error('Error recording referral click', {

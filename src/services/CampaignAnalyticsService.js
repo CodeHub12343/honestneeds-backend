@@ -6,10 +6,12 @@
  * Used by campaignController.getAnalytics endpoint
  */
 
+const mongoose = require('mongoose');
 const Campaign = require('../models/Campaign');
 const Transaction = require('../models/Transaction');
 const { ShareRecord } = require('../models/Share');
 const CampaignUpdate = require('../models/CampaignUpdate');
+const feeEngine = require('../utils/feeEngine');
 
 const CampaignAnalyticsService = {
   /**
@@ -174,8 +176,8 @@ const CampaignAnalyticsService = {
           averageDonation: donationStats.averageAmount,
           largestDonation: donationStats.maxAmount,
           smallestDonation: donationStats.minAmount,
-          platformFee: Math.round(donationStats.totalAmount * 0.2), // 20% fee
-          donorNetAmount: Math.round(donationStats.totalAmount * 0.8),
+          platformFee: feeEngine.calculateDonationFee(donationStats.totalAmount).feeCents,
+          donorNetAmount: feeEngine.calculateDonationFee(donationStats.totalAmount).netCents,
         },
 
         // Donation metrics
@@ -277,10 +279,14 @@ const CampaignAnalyticsService = {
         total_donors: campaign.total_donors,
       });
 
-      // FIX: Use campaign's built-in fields as primary source
-      // But add fallback logic when total_donation_amount is missing
-      let totalAmount = campaign.total_donation_amount || 0;
-      let totalCount = campaign.total_donations || 0;
+      // F-6/F-7: Source from the canonical denormalized fields (verified-only,
+      // kept in sync by TransactionService / CampaignMetricsService).
+      //  - raised  = metrics.total_donation_amount (GROSS cents)
+      //  - count   = metrics.total_donations (NOTE: the top-level `total_donations`
+      //              field holds the AMOUNT, not the count — do not use it here)
+      let totalAmount =
+        campaign.metrics?.total_donation_amount ?? campaign.total_donation_amount ?? 0;
+      let totalCount = campaign.metrics?.total_donations ?? 0;
       const averageAmount = campaign.average_donation || 0;
       const uniqueDonorCount = campaign.total_donors || 0;
 
@@ -312,8 +318,11 @@ const CampaignAnalyticsService = {
         donationsByDate = await Transaction.aggregate([
           {
             $match: {
-              campaign_id: campaignId,
-              status: { $in: ['verified', 'pending'] },
+              // Use the campaign's ObjectId (matching the string id matched nothing),
+              // verified-only (canonical), and the correct cents field.
+              campaign_id: campaign._id,
+              transaction_type: 'donation',
+              status: 'verified',
               created_at: { $gte: thirtyDaysAgo },
             },
           },
@@ -322,7 +331,7 @@ const CampaignAnalyticsService = {
               _id: {
                 $dateToString: { format: '%Y-%m-%d', date: '$created_at' },
               },
-              amount: { $sum: '$amount' },
+              amount: { $sum: '$amount_cents' },
               count: { $sum: 1 },
             },
           },
@@ -394,74 +403,63 @@ const CampaignAnalyticsService = {
         shares_by_channel: campaign.shares_by_channel,
       });
 
-      // FIX: Use campaign's built-in fields as primary source
-      const totalShares = (campaign.shares_paid || 0) + (campaign.shares_free || 0) || campaign.share_count || 0;
+      // SF-2: ShareRecord is the authoritative source for both the total and the
+      // per-channel breakdown, so the two can never disagree. Earlier bugs:
+      //   (a) per-channel read campaign.shares_by_channel (data is at
+      //       campaign.metrics.shares_by_channel),
+      //   (b) the aggregation grouped by $platform but the field is $channel,
+      //   (c) campaign_id was matched as a raw string vs an ObjectId.
+      const campaignObjectId = mongoose.Types.ObjectId.isValid(campaignId)
+        ? new mongoose.Types.ObjectId(campaignId)
+        : campaign._id;
 
-      // Initialize channel counts from campaign data if available
+      // Full union of valid channels so every platform renders (0 if unused).
       let byChannel = {
-        facebook: 0,
-        twitter: 0,
-        linkedin: 0,
-        email: 0,
-        whatsapp: 0,
-        link: 0,
+        facebook: 0, twitter: 0, instagram: 0, linkedin: 0, tiktok: 0,
+        whatsapp: 0, telegram: 0, reddit: 0, sms: 0, email: 0, other: 0,
       };
 
-      // If campaign has shares_by_channel data, use it
-      if (campaign.shares_by_channel && typeof campaign.shares_by_channel === 'object') {
-        byChannel = { ...byChannel, ...campaign.shares_by_channel };
-      }
-
-      // Try to get share details from ShareRecord for enhanced data
       const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
       let sharesByDate = [];
-      
-      try {
-        const sharesByPlatform = await ShareRecord.aggregate([
-          {
-            $match: {
-              campaign_id: campaignId,
-              created_at: { $gte: thirtyDaysAgo },
-            },
-          },
-          {
-            $group: {
-              _id: '$platform',
-              count: { $sum: 1 },
-            },
-          },
-        ]);
+      let recordTotal = 0;
 
-        // Merge ShareRecord data with campaign data
-        sharesByPlatform.forEach((share) => {
-          if (byChannel.hasOwnProperty(share._id)) {
-            // Use ShareRecord count if more recent 
-            byChannel[share._id] = Math.max(byChannel[share._id] || 0, share.count);
+      try {
+        // Authoritative per-channel counts from the share records themselves.
+        const recordsByChannel = await ShareRecord.aggregate([
+          { $match: { campaign_id: campaignObjectId } },
+          { $group: { _id: '$channel', count: { $sum: 1 } } },
+        ]);
+        recordsByChannel.forEach((r) => {
+          if (r._id) {
+            byChannel[r._id] = (byChannel[r._id] || 0) + r.count;
+            recordTotal += r.count;
           }
         });
 
-        // Get shares by date trend
+        // Shares-by-date trend (last 30 days).
         sharesByDate = await ShareRecord.aggregate([
-          {
-            $match: {
-              campaign_id: campaignId,
-              created_at: { $gte: thirtyDaysAgo },
-            },
-          },
-          {
-            $group: {
-              _id: {
-                $dateToString: { format: '%Y-%m-%d', date: '$created_at' },
-              },
-              count: { $sum: 1 },
-            },
-          },
+          { $match: { campaign_id: campaignObjectId, created_at: { $gte: thirtyDaysAgo } } },
+          { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$created_at' } }, count: { $sum: 1 } } },
           { $sort: { _id: 1 } },
         ]);
       } catch (shareError) {
         console.warn('⚠️ [Analytics] Could not fetch share details from ShareRecord:', shareError.message);
-        // Continue with campaign data
       }
+
+      // Fallback to the denormalized campaign metrics only if there are no share
+      // records yet (keeps the panel populated on legacy/denormalized-only data).
+      const metricsByChannel = campaign.metrics?.shares_by_channel || {};
+      if (recordTotal === 0 && metricsByChannel && typeof metricsByChannel === 'object') {
+        for (const [ch, n] of Object.entries(metricsByChannel)) {
+          if (typeof n === 'number') byChannel[ch] = (byChannel[ch] || 0) + n;
+        }
+      }
+
+      // Total reconciles with the breakdown: prefer the record count, then the
+      // denormalized metric counters, then the top-level share_count.
+      const metricsShares =
+        (campaign.metrics?.shares_paid || 0) + (campaign.metrics?.shares_free || 0);
+      const totalShares = recordTotal || metricsShares || campaign.share_count || 0;
 
       // Find top channel
       let topChannel = 'facebook';

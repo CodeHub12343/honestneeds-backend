@@ -151,6 +151,13 @@ const userRegistrationSchema = z.object({
     .min(2, 'Display name must be at least 2 characters')
     .max(100, 'Display name must not exceed 100 characters')
     .refine((name) => validateDisplayName(name).isValid, 'Invalid display name format'),
+  // Optional profile fields (backward compatible — clients may omit them)
+  firstName: z.string().max(60).optional(),
+  lastName: z.string().max(60).optional(),
+  username: z
+    .string()
+    .regex(/^[a-z0-9_.]{3,30}$/i, 'Username must be 3-30 chars: letters, numbers, _ or .')
+    .optional(),
 });
 
 /**
@@ -180,6 +187,9 @@ const validateRegistration = (data) => {
         email: normalizeEmail(validated.email),
         displayName: validated.displayName.trim(),
         password: validated.password,
+        firstName: validated.firstName ? validated.firstName.trim() : undefined,
+        lastName: validated.lastName ? validated.lastName.trim() : undefined,
+        username: validated.username ? validated.username.toLowerCase().trim() : undefined,
       },
       errors: null,
     };

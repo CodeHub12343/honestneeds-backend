@@ -72,6 +72,79 @@ const VolunteerProfileSchema = new mongoose.Schema(
         _id: false,
       },
     ],
+
+    // ── Employer-facing profile (used by the volunteer directory / hiring) ──
+    // A short professional tagline shown on directory cards.
+    headline: {
+      type: String,
+      maxlength: [120, 'Headline cannot exceed 120 characters'],
+      default: '',
+    },
+    // Location helps employers hire locally.
+    location: {
+      city: { type: String, default: '' },
+      region: { type: String, default: '' },
+      country: { type: String, default: '' },
+    },
+    languages: {
+      type: [String],
+      default: [],
+      validate: {
+        validator: (v) => v.length <= 15,
+        message: 'Languages cannot exceed 15 items',
+      },
+    },
+    experience_level: {
+      type: String,
+      enum: ['beginner', 'intermediate', 'expert'],
+      default: 'beginner',
+      index: true,
+    },
+    years_experience: {
+      type: Number,
+      min: [0, 'Years of experience cannot be negative'],
+      max: [70, 'Years of experience seems unreasonable'],
+      default: 0,
+    },
+    // What kind of engagement the person is open to. Volunteers can also be
+    // hired for paid work, so employers need to know the expectation up front.
+    engagement: {
+      open_to: {
+        type: String,
+        enum: ['volunteer_only', 'paid', 'both'],
+        default: 'volunteer_only',
+        index: true,
+      },
+      expected_rate: { type: Number, min: 0, default: null },
+      rate_currency: { type: String, default: 'NGN' },
+      rate_period: {
+        type: String,
+        enum: ['hour', 'day', 'project', 'month'],
+        default: 'hour',
+      },
+    },
+    work_preferences: {
+      remote: { type: Boolean, default: true },
+      onsite: { type: Boolean, default: true },
+      willing_to_travel: { type: Boolean, default: false },
+    },
+    // Portfolio / professional links an employer reviews before hiring.
+    links: {
+      portfolio_url: { type: String, default: '' },
+      linkedin_url: { type: String, default: '' },
+      resume_url: { type: String, default: '' },
+    },
+    // Opt-in contact details the volunteer chooses to expose to employers.
+    contact: {
+      email: { type: String, default: '' },
+      phone: { type: String, default: '' },
+      preferred_method: {
+        type: String,
+        enum: ['inApp', 'email', 'phone'],
+        default: 'inApp',
+      },
+    },
+
     availability: {
       days_per_week: {
         type: Number,
@@ -103,6 +176,45 @@ const VolunteerProfileSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+
+    // ── Gamification (VO-04): volunteer-scoped XP & level ──────────
+    xp: {
+      type: Number,
+      default: 0,
+    },
+    level: {
+      type: Number,
+      default: 1,
+    },
+
+    // ── Proof of Kindness (VO-06) ─────────────────────────────────
+    proof_of_kindness_count: {
+      type: Number,
+      default: 0,
+      index: true,
+    },
+
+    // ── Hope Responder Program (VO-08) ────────────────────────────
+    hope_responder: {
+      enrolled: { type: Boolean, default: false },
+      status: {
+        type: String,
+        enum: ['inactive', 'pending', 'active', 'suspended'],
+        default: 'inactive',
+      },
+      verified: { type: Boolean, default: false },
+      enrolled_at: { type: Date, default: null },
+      radius_km: { type: Number, default: 25, min: 1, max: 200 },
+      categories: { type: [String], default: [] },
+      // GeoJSON point for responder dispatch matching. [longitude, latitude]
+      location: {
+        type: { type: String, enum: ['Point'], default: 'Point' },
+        coordinates: { type: [Number], default: [0, 0] },
+      },
+      responses_count: { type: Number, default: 0 },
+      resolved_count: { type: Number, default: 0 },
+    },
+
     status: {
       type: String,
       enum: ['active', 'inactive', 'suspended'],
@@ -207,7 +319,11 @@ const VolunteerProfileSchema = new mongoose.Schema(
 VolunteerProfileSchema.index({ user_id: 1, status: 1 });
 VolunteerProfileSchema.index({ status: 1, rating: -1 });
 VolunteerProfileSchema.index({ total_hours: -1 });
+VolunteerProfileSchema.index({ xp: -1 });
 VolunteerProfileSchema.index({ joined_date: -1 });
+// Hope Responder dispatch matching (VO-08).
+VolunteerProfileSchema.index({ 'hope_responder.location': '2dsphere' }, { sparse: true });
+VolunteerProfileSchema.index({ 'hope_responder.status': 1, 'hope_responder.verified': 1 });
 
 /**
  * Instance Methods
@@ -413,6 +529,59 @@ VolunteerProfileSchema.statics.findAvailableWithSkills = function (requiredSkill
   })
     .sort({ rating: -1, joined_date: -1 })
     .limit(limit)
+    .lean();
+};
+
+/**
+ * Add a badge by code if not already earned. Mutates in memory (no save).
+ * @param {String} code
+ * @returns {Boolean} true if newly added
+ */
+VolunteerProfileSchema.methods.grantBadge = function (code) {
+  if (!code) return false;
+  if (this.badges.includes(code)) return false;
+  this.badges.push(code);
+  return true;
+};
+
+/**
+ * Recompute the volunteer level from current xp using the program tiers.
+ * @returns {Number} the new level
+ */
+VolunteerProfileSchema.methods.recomputeLevel = function () {
+  // Lazy require to avoid a circular config dependency at module load.
+  const { getVolunteerLevelForXp } = require('../config/volunteerProgram');
+  this.level = getVolunteerLevelForXp(this.xp).level;
+  return this.level;
+};
+
+/**
+ * Volunteer hours leaderboard (top by verified total_hours).
+ * @param {Object} [opts] - { limit, type }
+ */
+VolunteerProfileSchema.statics.leaderboardByHours = function (opts = {}) {
+  const { limit = 20, type } = opts;
+  const query = { status: 'active', deleted_at: null, total_hours: { $gt: 0 } };
+  if (type) query.volunteering_type = type;
+  return this.find(query)
+    .sort({ total_hours: -1, rating: -1 })
+    .limit(Math.min(limit, 100))
+    .populate('user_id', 'display_name username avatar_url profile_picture location.city')
+    .lean();
+};
+
+/**
+ * Volunteer XP leaderboard (top by volunteer xp).
+ * @param {Object} [opts] - { limit, type }
+ */
+VolunteerProfileSchema.statics.leaderboardByXp = function (opts = {}) {
+  const { limit = 20, type } = opts;
+  const query = { status: 'active', deleted_at: null, xp: { $gt: 0 } };
+  if (type) query.volunteering_type = type;
+  return this.find(query)
+    .sort({ xp: -1, total_hours: -1 })
+    .limit(Math.min(limit, 100))
+    .populate('user_id', 'display_name username avatar_url profile_picture location.city')
     .lean();
 };
 

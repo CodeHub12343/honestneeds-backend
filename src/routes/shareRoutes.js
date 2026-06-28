@@ -26,6 +26,29 @@ router.get('/campaigns/:campaignId/shares/stats', ShareController.getShareStats)
 router.get('/user/shares', authMiddleware, ShareController.getMyShares);
 
 /**
+ * Daily Share-Limit + Extra-Share Request Routes (client rule, 2026-06)
+ *
+ * A user earns a tip from only ONE reward-eligible share per campaign per day.
+ * They can ask the creator (with a reason) to share again for a tip; free
+ * sharing is always allowed.
+ */
+
+// GET /campaigns/:campaignId/share/eligibility - My daily tip-eligibility status
+router.get('/campaigns/:campaignId/share/eligibility', authMiddleware, ShareController.getShareEligibility);
+
+// POST /campaigns/:campaignId/share/extra-request - Sharer requests another tip-eligible share
+router.post('/campaigns/:campaignId/share/extra-request', authMiddleware, ShareController.requestExtraShare);
+
+// GET /campaigns/:campaignId/share/extra-requests - Creator inbox for a campaign
+router.get('/campaigns/:campaignId/share/extra-requests', authMiddleware, ShareController.listCampaignExtraShareRequests);
+
+// GET /sharer/extra-requests - Sharer's own extra-share requests
+router.get('/sharer/extra-requests', authMiddleware, ShareController.getMyExtraShareRequests);
+
+// POST /share/extra-requests/:requestId/review - Creator approves/denies a request
+router.post('/share/extra-requests/:requestId/review', authMiddleware, ShareController.reviewExtraShareRequest);
+
+/**
  * Share Configuration Routes
  */
 
@@ -62,6 +85,22 @@ router.get('/user/referral-performance', authMiddleware, ShareController.getSupp
 // GET /sharer/earnings/available - Get available earnings for withdrawal
 // Returns: { balance_cents, available_cents, pending_cents, total_earned_cents, currency }
 router.get('/sharer/earnings/available', authMiddleware, ShareController.getAvailableEarnings);
+
+// GET /sharer/rewards - Sharer rewards dashboard (summary + verified/pending lists)
+router.get('/sharer/rewards', authMiddleware, ShareController.getSharerRewards);
+
+// POST /sharer/payout-requests - Request a payout (dashboard-friendly alias)
+router.post('/sharer/payout-requests', authMiddleware, ShareController.createSharerPayoutRequest);
+
+// F-3: GET /sharer/payouts - Sharer's payout claims with per-campaign timeline slices
+router.get('/sharer/payouts', authMiddleware, ShareController.getSharerPayouts);
+
+// F-3: POST /sharer/payouts/:withdrawalId/campaigns/:campaignId/received - Confirm receipt
+router.post(
+  '/sharer/payouts/:withdrawalId/campaigns/:campaignId/received',
+  authMiddleware,
+  ShareController.confirmPayoutReceived
+);
 
 /**
  * Share Budget Routes
@@ -119,16 +158,13 @@ router.get('/user/conversion-analytics', authMiddleware, ShareController.getSupp
 
 /**
  * Share Payout Routes (Feature 9)
+ *
+ * Sharer payout requests are served by the SINGLE canonical route
+ * `POST /sharer/payout-requests` (ShareController.createSharerPayoutRequest),
+ * defined above. The former duplicate `POST /payouts/request` was retired —
+ * createSharerPayoutRequest normalizes both legacy body shapes
+ * ({ amountCents | amount_cents, paymentMethod | payout_method, accountDetails }).
  */
-
-/**
- * POST /share-payouts/request
- * Request withdrawal/payout of earned share rewards
- * Body: { amountCents, paymentMethod, accountDetails, purpose? }
- * Response: 201 Created with payout request details
- * Auth: Required
- */
-router.post('/payouts/request', authMiddleware, ShareController.requestSharePayout);
 
 /**
  * Admin Reload Routes

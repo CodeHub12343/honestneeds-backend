@@ -57,6 +57,27 @@ const shareRecordSchema = new mongoose.Schema(
       index: true,
     },
 
+    // Daily share-limit gating (client rule, 2026-06):
+    // A user may earn a tip from only ONE reward-eligible share per campaign per
+    // UTC day (plus any extra slots a creator explicitly granted — see ShareGrant).
+    // Additional same-day shares are still allowed but recorded as FREE shares
+    // (reward_eligible:false) so they drive traffic without paying out again.
+    // A converting referral only pays the sharer when its originating share is
+    // reward_eligible. Legacy shares (field absent) are treated as eligible.
+    reward_eligible: {
+      type: Boolean,
+      default: true,
+      index: true,
+    },
+
+    // If this reward-eligible share consumed a creator-approved extra-share grant
+    // (i.e. it was beyond the 1/day base allowance), the grant is linked here.
+    extra_share_grant_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ShareGrant',
+      default: null,
+    },
+
     reward_amount: {
       type: Number, // in cents
       default: 0,

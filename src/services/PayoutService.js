@@ -15,85 +15,12 @@ const User = require('../models/User');
 const winstonLogger = require('../utils/winstonLogger');
 
 class PayoutService {
-  /**
-   * Initiate a payout when campaign completes
-   * Creates Payout record and triggers processing
-   *
-   * @param {string} campaignId - Campaign ID
-   * @param {object} creatorId - Creator user ID
-   * @returns {Promise<object>} Created Payout record
-   */
-  static async initiatePayout(campaignId, creatorId) {
-    try {
-      // Find campaign
-      const campaign = await Campaign.findById(campaignId);
-      if (!campaign) {
-        throw new Error('Campaign not found');
-      }
-
-      // Verify creator matches
-      if (campaign.creator_id.toString() !== creatorId.toString()) {
-        throw new Error('Creator mismatch');
-      }
-
-      // Calculate amounts
-      const totalRaisedCents = campaign.total_donation_amount_cents || 0;
-      const platformFeeCents = Math.round(totalRaisedCents * 0.2); // 20% platform fee
-      const payoutAmountCents = totalRaisedCents - platformFeeCents;
-
-      // Get creator info for audit trail
-      const creator = await User.findById(creatorId);
-      if (!creator) {
-        throw new Error('Creator user not found');
-      }
-
-      // Generate payout ID
-      const payoutId = `PAYOUT-${new Date().toISOString().split('T')[0]}-${Date.now()}`;
-
-      // Determine payment method (use creator's preferred method or default)
-      const paymentMethod = creator.preferred_payout_method || 'stripe';
-
-      // Create payout record
-      const payout = await Payout.create({
-        payout_id: payoutId,
-        campaign_id: campaign._id,
-        campaign_ref_id: campaign.campaign_id,
-        creator_id: creatorId,
-        total_raised_cents: totalRaisedCents,
-        platform_fee_cents: platformFeeCents,
-        payout_amount_cents: payoutAmountCents,
-        payment_method: paymentMethod,
-        status: 'initiated',
-        metadata: {
-          campaign_title: campaign.title,
-          creator_name: creator.display_name,
-          creator_email: creator.email,
-          total_donations_count: campaign.total_donations || 0,
-        },
-      });
-
-      payout.addNote('created', 'Payout initiated from campaign completion');
-      await payout.save();
-
-      winstonLogger.info('Payout initiated', {
-        payout_id: payout.payout_id,
-        campaign_id: campaign.campaign_id,
-        creator_id: creatorId,
-        amount_cents: payoutAmountCents,
-        payment_method: paymentMethod,
-      });
-
-      return payout;
-    } catch (error) {
-      winstonLogger.error('Error initiating payout', {
-        error: error.message,
-        campaignId,
-        creatorId,
-        stack: error.stack,
-      });
-      throw error;
-    }
-  }
+  // REMOVED (R-1 / F-8): initiatePayout() created a creator "payout" of donation
+  // funds with a 20% platform fee on campaign completion. Invalid for the
+  // MANUAL-payment model — donors pay creators directly, the platform never holds
+  // donation money, so there is nothing to "pay out" and no 20% to take. The
+  // platform's only claim is the per-donation fee on the fee-settlement ledger
+  // (FeeTransaction / FeeTrackingService.getCreatorFeeStatement). Do not re-add.
 
   /**
    * Process pending payouts
@@ -123,59 +50,43 @@ class PayoutService {
       payout.markAsProcessing();
       await payout.save();
 
-      // Route to appropriate processor
-      let result;
-      switch (payout.payment_method) {
-        case 'stripe':
-          result = await this._processStripeTransfer(payout);
-          break;
-        case 'paypal':
-          result = await this._processPayPalTransfer(payout);
-          break;
-        case 'bank_transfer':
-          result = await this._processBankTransfer(payout);
-          break;
-        case 'manual':
-          result = await this._processManualPayout(payout);
-          break;
-        default:
-          throw new Error(`Unsupported payment method: ${payout.payment_method}`);
+      // Manual model: automated escrow transfers (Stripe/PayPal/bank) are retired.
+      // The platform never holds funds, so payouts are settled manually off-platform
+      // (the canonical sharer-payout flow is CampaignPayoutController.markPayoutAsPaid).
+      if (payout.payment_method && payout.payment_method !== 'manual') {
+        winstonLogger.warn('Non-manual payout method rejected (automated transfers retired)', {
+          payout_id: payout.payout_id,
+          payment_method: payout.payment_method,
+        });
+        return {
+          success: false,
+          error_message: 'Automated transfers are retired. Settle this payout manually.',
+          error_code: 'automated_transfers_retired',
+        };
       }
 
+      const result = await this._processManualPayout(payout);
+
       if (result.success) {
-        payout.markAsCompleted(result.transaction_id, payout.payment_method);
+        payout.markAsCompleted(result.transaction_id, 'manual');
         await payout.save();
 
-        winstonLogger.info('Payout completed successfully', {
+        winstonLogger.info('Manual payout completed', {
           payout_id: payout.payout_id,
           amount_cents: payout.payout_amount_cents,
           transaction_id: result.transaction_id,
         });
 
-        // Send success email to creator
         await this._sendPayoutSuccessEmail(payout);
       } else {
-        // Handle failure
         payout.markAsFailed(result.error_message, result.error_code);
-
-        // Schedule retry if retriable
-        if (payout.canRetry()) {
-          payout.scheduleRetry(60); // Retry in 60 minutes
-        }
-
         await payout.save();
 
-        winstonLogger.error('Payout processing failed', {
+        winstonLogger.error('Manual payout failed', {
           payout_id: payout.payout_id,
           error_message: result.error_message,
           error_code: result.error_code,
-          retry_count: payout.retry_count,
-          will_retry: payout.canRetry(),
         });
-
-        // Send failure email to creator and admin
-        await this._sendPayoutFailureEmail(payout);
-        await this._alertAdminPayoutFailure(payout);
       }
 
       return result;
@@ -190,124 +101,10 @@ class PayoutService {
   }
 
   /**
-   * Process Stripe Connect transfer
-   * @private
-   */
-  static async _processStripeTransfer(payout) {
-    try {
-      const stripe = require('stripe')(process.env.STRIPE_API_KEY);
-
-      // Get creator's Stripe Connect account
-      const creator = await User.findById(payout.creator_id._id || payout.creator_id);
-      if (!creator?.stripe_connect_account_id) {
-        throw new Error('Creator has no Stripe Connect account');
-      }
-
-      // Create transfer
-      const transfer = await stripe.transfers.create({
-        amount: payout.payout_amount_cents,
-        currency: 'usd',
-        destination: creator.stripe_connect_account_id,
-        description: `HonestNeed creator payout for campaign: ${payout.metadata.campaign_title}`,
-        metadata: {
-          payout_id: payout.payout_id,
-          campaign_id: payout.campaign_ref_id,
-        },
-      });
-
-      // Store Stripe details
-      payout.stripe_transfer_id = transfer.id;
-      payout.stripe_account_id = creator.stripe_connect_account_id;
-
-      return {
-        success: true,
-        transaction_id: transfer.id,
-        processor: 'stripe',
-        amount: transfer.amount,
-        currency: transfer.currency,
-      };
-    } catch (error) {
-      winstonLogger.error('Stripe transfer failed', {
-        error: error.message,
-        payoutId: payout.payout_id,
-      });
-
-      return {
-        success: false,
-        error_message: error.message,
-        error_code: this._mapStripeError(error),
-      };
-    }
-  }
-
-  /**
-   * Process PayPal payout
-   * @private
-   */
-  static async _processPayPalTransfer(payout) {
-    try {
-      const paypalSdk = require('@paypal/checkout-server-sdk');
-
-      // Get PayPal environment
-      const environment = process.env.NODE_ENV === 'production'
-        ? new paypalSdk.core.LiveEnvironment(
-          process.env.PAYPAL_CLIENT_ID,
-          process.env.PAYPAL_CLIENT_SECRET
-        )
-        : new paypalSdk.core.SandboxEnvironment(
-          process.env.PAYPAL_CLIENT_ID,
-          process.env.PAYPAL_CLIENT_SECRET
-        );
-
-      const client = new paypalSdk.core.PayPalHttpClient(environment);
-
-      // Get creator's PayPal email
-      const creator = await User.findById(payout.creator_id._id || payout.creator_id);
-      if (!creator?.paypal_email) {
-        throw new Error('Creator has no PayPal email on file');
-      }
-
-      // Create batch payout
-      // Note: Simplified - in production, use Payouts API
-      throw new Error('PayPal payouts not yet implemented - contact admin');
-    } catch (error) {
-      winstonLogger.error('PayPal transfer failed', {
-        error: error.message,
-        payoutId: payout.payout_id,
-      });
-
-      return {
-        success: false,
-        error_message: error.message,
-        error_code: 'paypal_not_implemented',
-      };
-    }
-  }
-
-  /**
-   * Process ACH bank transfer
-   * @private
-   */
-  static async _processBankTransfer(payout) {
-    try {
-      // Integration with ACH provider (e.g., Stripe ACH, Plaid)
-      throw new Error('Bank transfers not yet implemented - contact admin');
-    } catch (error) {
-      winstonLogger.error('Bank transfer failed', {
-        error: error.message,
-        payoutId: payout.payout_id,
-      });
-
-      return {
-        success: false,
-        error_message: error.message,
-        error_code: 'bank_transfer_not_implemented',
-      };
-    }
-  }
-
-  /**
-   * Process manual payout (for admin entry)
+   * Process manual payout (off-platform settlement; the only supported method).
+   * Automated escrow transfers (Stripe Connect / PayPal / ACH) were retired —
+   * the platform never holds funds, so a "manual" payout just records that the
+   * money was sent off-platform and stamps a reference.
    * @private
    */
   static async _processManualPayout(payout) {
@@ -328,98 +125,6 @@ class PayoutService {
   }
 
   /**
-   * Process all pending payouts
-   * Called by scheduled job
-   *
-   * @returns {Promise<object>} Processing summary
-   */
-  static async processPendingPayouts() {
-    try {
-      const pending = await Payout.findPending();
-      winstonLogger.info('Processing pending payouts', { count: pending.length });
-
-      const results = {
-        total: pending.length,
-        successful: 0,
-        failed: 0,
-        errors: [],
-      };
-
-      for (const payout of pending) {
-        try {
-          const result = await this.processPayout(payout._id);
-          if (result.success) {
-            results.successful += 1;
-          } else {
-            results.failed += 1;
-          }
-        } catch (error) {
-          results.failed += 1;
-          results.errors.push({
-            payout_id: payout.payout_id,
-            error: error.message,
-          });
-        }
-      }
-
-      winstonLogger.info('Pending payouts processing complete', results);
-      return results;
-    } catch (error) {
-      winstonLogger.error('Error processing pending payouts', {
-        error: error.message,
-        stack: error.stack,
-      });
-      throw error;
-    }
-  }
-
-  /**
-   * Process failed payouts eligible for retry
-   * Called by scheduled job
-   *
-   * @returns {Promise<object>} Retry summary
-   */
-  static async processFailedPayoutsForRetry() {
-    try {
-      const failedForRetry = await Payout.findFailedForRetry();
-      winstonLogger.info('Processing failed payouts for retry', {
-        count: failedForRetry.length,
-      });
-
-      const results = {
-        total: failedForRetry.length,
-        retried: 0,
-        errors: [],
-      };
-
-      for (const payout of failedForRetry) {
-        try {
-          // Reset to initiated for retry
-          payout.status = 'initiated';
-          await payout.save();
-
-          const result = await this.processPayout(payout._id);
-          results.retried += 1;
-        } catch (error) {
-          results.errors.push({
-            payout_id: payout.payout_id,
-            error: error.message,
-          });
-        }
-      }
-
-      winstonLogger.info('Failed payouts retry processing complete', results);
-      return results;
-    } catch (error) {
-      winstonLogger.error('Error processing failed payouts for retry', {
-        error: error.message,
-        stack: error.stack,
-      });
-      throw error;
-    }
-  }
-
-  /**
    * Send success email to creator
    * @private
    */
@@ -436,58 +141,6 @@ class PayoutService {
         payoutId: payout.payout_id,
       });
     }
-  }
-
-  /**
-   * Send failure email to creator
-   * @private
-   */
-  static async _sendPayoutFailureEmail(payout) {
-    try {
-      const emailService = require('./emailService');
-      const campaign = await Campaign.findById(payout.campaign_id);
-      const creator = await User.findById(payout.creator_id);
-
-      await emailService.sendPayoutFailure(creator, payout, campaign);
-    } catch (error) {
-      winstonLogger.error('Failed to send payout failure email', {
-        error: error.message,
-        payoutId: payout.payout_id,
-      });
-    }
-  }
-
-  /**
-   * Alert admin of payout failure
-   * @private
-   */
-  static async _alertAdminPayoutFailure(payout) {
-    try {
-      const emailService = require('./emailService');
-      await emailService.alertAdminPayoutFailure(payout);
-    } catch (error) {
-      winstonLogger.error('Failed to alert admin of payout failure', {
-        error: error.message,
-        payoutId: payout.payout_id,
-      });
-    }
-  }
-
-  /**
-   * Map Stripe errors to error codes
-   * @private
-   */
-  static _mapStripeError(error) {
-    const message = error.message?.toLowerCase() || '';
-
-    if (message.includes('invalid_account')) return 'invalid_account';
-    if (message.includes('insufficient')) return 'insufficient_balance';
-    if (message.includes('restricted')) return 'account_restricted';
-    if (message.includes('limit')) return 'transfer_limit';
-    if (message.includes('rate')) return 'rate_limit';
-    if (message.includes('amount')) return 'invalid_amount';
-
-    return 'processing_error';
   }
 
   /**
@@ -523,6 +176,114 @@ class PayoutService {
    * @param {string} data.paymentMethodId - PaymentMethod document ID
    * @returns {Promise<Object>} Created ShareWithdrawal record with payment details
    */
+  /**
+   * Split a payout amount across the campaigns whose CLEARED (approved) share
+   * rewards the sharer is drawing from, so each campaign's creator can see and
+   * pay their own slice (manual model). Allocates oldest-campaign-first against
+   * each campaign's available balance (cleared minus amounts already
+   * withdrawn/reserved by prior itemized withdrawals).
+   * @returns {Promise<{campaign_withdrawals: Array, unallocated_cents: number}>}
+   */
+  static async allocateAcrossCampaigns(userId, amountCents) {
+    const mongoose = require('mongoose');
+    const Transaction = require('../models/Transaction');
+    const ShareWithdrawal = require('../models/ShareWithdrawal');
+
+    const uid =
+      typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
+
+    // Claimable reward totals per campaign, oldest first. Trust-based: 'owed'
+    // rewards are immediately claimable; legacy 'approved' (cleared from the old
+    // 30-day hold) is still withdrawable.
+    const clearedByCampaign = await Transaction.aggregate([
+      {
+        $match: {
+          supporter_id: uid,
+          transaction_type: 'share_reward',
+          status: { $in: ['owed', 'approved'] },
+        },
+      },
+      {
+        $group: {
+          _id: '$campaign_id',
+          cleared: { $sum: '$amount_cents' },
+          firstAt: { $min: '$created_at' },
+        },
+      },
+      { $sort: { firstAt: 1 } },
+    ]);
+
+    // Already-SETTLED rewards per campaign ('paid'). H-2: settlement is
+    // status-driven — when a creator pays, the underlying rewards flip
+    // owed→paid and LEAVE the `cleared` pool above. So a completed withdrawal
+    // that settled them must NOT be subtracted from `cleared` a second time.
+    // We net completed-committed against `paid` below, exactly as
+    // ShareService.getEarningsLedger does, so the payout gate and this
+    // allocation always agree (previously they didn't → false 500 rejections).
+    const paidAgg = await Transaction.aggregate([
+      {
+        $match: {
+          supporter_id: uid,
+          transaction_type: 'share_reward',
+          status: 'paid',
+        },
+      },
+      { $group: { _id: '$campaign_id', paid: { $sum: '$amount_cents' } } },
+    ]);
+    const paidByCampaign = {};
+    paidAgg.forEach((r) => {
+      if (r._id) paidByCampaign[r._id.toString()] = r.paid || 0;
+    });
+
+    // Per-campaign committed amounts from existing withdrawals, split by state:
+    //   reserved  = in-flight (pending/processing)
+    //   completed = settled records (netted against `paid` to catch only LEGACY
+    //               pre-pivot withdrawals where rewards stayed 'approved')
+    const existing = await ShareWithdrawal.find({
+      user_id: uid,
+      status: { $in: ['pending', 'processing', 'completed'] },
+    }).select('campaign_withdrawals status');
+
+    const reserved = {};
+    const completedCommitted = {};
+    existing.forEach((w) => {
+      const bucket = w.status === 'completed' ? completedCommitted : reserved;
+      (w.campaign_withdrawals || []).forEach((cw) => {
+        if (!cw.campaign_id) return;
+        const k = cw.campaign_id.toString();
+        bucket[k] = (bucket[k] || 0) + (cw.amount_cents || 0);
+      });
+    });
+
+    // Allocate oldest-campaign-first against each campaign's TRUE available:
+    //   available = owed − reserved − max(0, completedCommitted − paid)
+    let remaining = amountCents;
+    let allocatable = 0;
+    const campaign_withdrawals = [];
+    for (const row of clearedByCampaign) {
+      if (!row._id) continue; // skip rewards with no campaign attribution
+      const k = row._id.toString();
+      const legacyWithdrawn = Math.max(0, (completedCommitted[k] || 0) - (paidByCampaign[k] || 0));
+      const available = Math.max(0, (row.cleared || 0) - (reserved[k] || 0) - legacyWithdrawn);
+      if (available <= 0) continue;
+      allocatable += available;
+      if (remaining <= 0) continue; // keep summing allocatable, stop taking
+      const take = Math.min(available, remaining);
+      campaign_withdrawals.push({
+        campaign_id: row._id,
+        amount_cents: take,
+        status: 'pending',
+      });
+      remaining -= take;
+    }
+
+    return {
+      campaign_withdrawals,
+      unallocated_cents: Math.max(0, remaining),
+      allocatable_cents: allocatable,
+    };
+  }
+
   static async createPayoutRequest(data) {
     try {
       const { userId, amountCents, paymentMethodId } = data;
@@ -584,11 +345,31 @@ class PayoutService {
         };
       }
 
+      // Fix #1: itemize the payout per campaign so each creator can see & pay
+      // their own slice, and so per-campaign reservation accounting is correct.
+      const { campaign_withdrawals, unallocated_cents, allocatable_cents } =
+        await PayoutService.allocateAcrossCampaigns(userId, amountCents);
+      if (unallocated_cents > 0) {
+        // H-2: this is a balance/business condition, not a server fault — surface
+        // it as a typed 409 with the true claimable figure so the caller can show
+        // a clean message that matches the dashboard.
+        const err = new Error(
+          `Insufficient claimable balance to cover this payout. You can currently claim $${(
+            allocatable_cents / 100
+          ).toFixed(2)}.`
+        );
+        err.code = 'INSUFFICIENT_ALLOCATABLE';
+        err.statusCode = 409;
+        err.allocatable_cents = allocatable_cents;
+        throw err;
+      }
+
       // Create the withdrawal record
       const withdrawal = await ShareWithdrawal.create({
         withdrawal_id: withdrawalId,
         user_id: userId,
         amount_requested: amountCents,
+        campaign_withdrawals,
         payment_method_id: paymentMethodId,
         payment_type: paymentMethod.type,
         payment_details: paymentDetails,
@@ -602,6 +383,47 @@ class PayoutService {
         payment_type: paymentMethod.type,
         payment_details: paymentDetails,
       });
+
+      // Phase 5: notify each campaign's creator that a sharer is claiming a
+      // payout they must settle directly. One notification per campaign slice.
+      try {
+        const Campaign = require('../models/Campaign');
+        const NotificationDispatcher = require('./NotificationDispatcher');
+        const sliceCampaignIds = campaign_withdrawals.map((cw) => cw.campaign_id);
+        const camps = await Campaign.find({ _id: { $in: sliceCampaignIds } }).select('title creator_id');
+        const campById = {};
+        camps.forEach((c) => { campById[c._id.toString()] = c; });
+
+        await Promise.all(
+          campaign_withdrawals.map((cw) => {
+            const camp = campById[cw.campaign_id?.toString()];
+            if (!camp?.creator_id) return null;
+            return NotificationDispatcher.notify({
+              userId: camp.creator_id,
+              type: 'payout_requested',
+              data: {
+                campaign_id: cw.campaign_id,
+                campaign_title: camp.title,
+                withdrawal_id: withdrawalId,
+                slice_amount_cents: cw.amount_cents,
+              },
+              overrides: {
+                title: '💰 New payout request',
+                message: `A sharer requested a $${((cw.amount_cents || 0) / 100).toFixed(2)} payout for "${camp.title}". Pay them directly and mark it paid.`,
+                action_url: `/sharers-payouts/${cw.campaign_id}`,
+                icon_emoji: '💰',
+                color: 'info',
+              },
+            });
+          })
+        );
+      } catch (notifyErr) {
+        // Notifications must never block a payout request.
+        winstonLogger.error('⚠️ PayoutService: payout-request notification failed (non-fatal)', {
+          error: notifyErr.message,
+          withdrawal_id: withdrawalId,
+        });
+      }
 
       // Return withdrawal with full payment method details for response
       return {

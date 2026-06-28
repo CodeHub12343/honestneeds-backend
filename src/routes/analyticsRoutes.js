@@ -517,6 +517,63 @@ router.get('/donation-trends', analyticsController.getDonationTrends);
  */
 router.get('/revenue', authenticate, authorize('admin'), analyticsController.getRevenue);
 
-module.exports = router;
+// ============================================
+// ADVANCED ANALYTICS ROUTES (PRD §3.10)
+// ============================================
+
+/**
+ * GET /api/analytics/platform
+ * @description AN-02 — Comprehensive platform analytics dashboard
+ * @access Admin only
+ * @param {string} period - 'day'|'week'|'month'|'quarter'|'year'|'all' (default: 'month')
+ */
+router.get('/platform', authenticate, analyticsController.getPlatformAnalytics);
+
+/**
+ * GET /api/analytics/donor
+ * @description AN-04 — Personal donor analytics (giving history, impact, tax summary)
+ * @access Authenticated (self); admins may pass ?userId=
+ * @param {string} period - 'month'|'quarter'|'year'|'all' (default: 'all')
+ */
+router.get('/donor', authenticate, analyticsController.getDonorAnalytics);
+
+/**
+ * GET /api/analytics/business/:businessId/impact
+ * @description AN-05 — Business social-impact / CSR rollup
+ * @access Business owner or admin
+ */
+router.get('/business/:businessId/impact', authenticate, analyticsController.getBusinessImpactAnalytics);
+
+/**
+ * GET /api/analytics/sponsor/roi
+ * @description AN-06 — Sponsor return-on-investment analytics
+ * @access Authenticated sponsor (self); admins may pass ?userId=
+ */
+router.get('/sponsor/roi', authenticate, analyticsController.getSponsorROIAnalytics);
+
+/**
+ * GET /api/analytics/impact
+ * @description AN-07 — Public platform impact dashboard (headline numbers)
+ * @access Public
+ */
+router.get('/impact', analyticsController.getPublicImpactDashboard);
+
+/**
+ * GET /api/analytics/regions
+ * @description AN-08 — City/region impact reports
+ * @access Public
+ * @param {string} groupBy - 'country'|'state'|'city' (default: 'state')
+ * @param {string} country - optional country filter
+ * @param {string} state - optional state filter
+ * @param {number} limit - max regions (default 50, max 200)
+ */
+router.get('/regions', analyticsController.getRegionImpactReport);
+
+/**
+ * GET /api/analytics/campaigns/:id/viral-score
+ * @description AN-09 — AI viral score predictor (0-100 with factor breakdown)
+ * @access Public
+ */
+router.get('/campaigns/:id/viral-score', analyticsController.getViralScorePrediction);
 
 module.exports = router;

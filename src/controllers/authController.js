@@ -21,7 +21,7 @@ const {
  */
 const register = async (req, res, next) => {
   try {
-    const { email, password, displayName } = req.body;
+    const { email, password, displayName, firstName, lastName, username } = req.body;
 
     logger.info('📝 Register Handler: Processing registration request', {
       email,
@@ -34,6 +34,9 @@ const register = async (req, res, next) => {
       email,
       password,
       displayName,
+      firstName,
+      lastName,
+      username,
     });
 
     logger.info('✅ Register Handler: User registered successfully', {
@@ -56,6 +59,7 @@ const register = async (req, res, next) => {
       data: {
         user: result.user,
         token: result.accessToken,
+        refreshToken: result.refreshToken,
       },
     });
   } catch (error) {
@@ -107,6 +111,7 @@ const login = async (req, res, next) => {
       data: {
         user: result.user,
         token: result.accessToken,
+        refreshToken: result.refreshToken,
       },
     });
   } catch (error) {
@@ -149,11 +154,10 @@ const refreshAccessToken = async (req, res, next) => {
     // Get user to verify they still exist and get their roles
     const userResult = await userService.getUserById(decoded.userId);
 
-    // Generate new access token
+    // Generate new access token (lifetime comes from JWT_EXPIRY env default)
     const newAccessToken = generateToken(
       decoded.userId,
-      userResult.user.role ? [userResult.user.role] : ['user'],
-      '24h'
+      userResult.user.role ? [userResult.user.role] : ['user']
     );
 
     logger.info('Access token refreshed', {

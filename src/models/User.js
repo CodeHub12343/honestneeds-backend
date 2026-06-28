@@ -28,10 +28,46 @@ const userSchema = new mongoose.Schema(
       minlength: 2,
       maxlength: 100,
     },
+    first_name: {
+      type: String,
+      trim: true,
+      maxlength: 60,
+      default: null,
+    },
+    last_name: {
+      type: String,
+      trim: true,
+      maxlength: 60,
+      default: null,
+    },
+    // Unique handle (stored lowercase). Uniqueness is enforced by a PARTIAL
+    // index declared below — not here — because `sparse` does not help when the
+    // field is explicitly stored as null (default: null), which made every
+    // null-username user collide on insert.
+    username: {
+      type: String,
+      trim: true,
+      lowercase: true,
+      minlength: 3,
+      maxlength: 30,
+      match: [/^[a-z0-9_.]+$/, 'Username may only contain letters, numbers, underscores and dots'],
+      default: null,
+    },
     phone: {
       type: String,
       trim: true,
       default: null,
+    },
+    phone_verified: {
+      type: Boolean,
+      default: false,
+    },
+    // Transient phone verification challenge (OTP). Never returned in toJSON.
+    phone_verification: {
+      code_hash: { type: String, default: null },
+      expires_at: { type: Date, default: null },
+      attempts: { type: Number, default: 0 },
+      last_sent_at: { type: Date, default: null },
     },
     avatar_url: {
       type: String,
@@ -51,6 +87,15 @@ const userSchema = new mongoose.Schema(
       enum: ['user', 'creator', 'admin'],
       default: 'user',
       index: true,
+    },
+    // ── Granular admin RBAC (AD-03) ────────────────────────────────────
+    // Only meaningful when role === 'admin'. Empty array on an admin is
+    // treated as super_admin for backward compatibility. Valid keys are
+    // defined in config/adminRoles.js (super_admin|moderator|finance|
+    // compliance|support|analyst).
+    admin_roles: {
+      type: [String],
+      default: [],
     },
     verified: {
       type: Boolean,
@@ -83,6 +128,7 @@ const userSchema = new mongoose.Schema(
       longitude: Number,
       address: String,
       city: String,
+      state: String,
       country: String,
       coordinates: {
         type: { type: String, enum: ['Point'], default: 'Point' },
@@ -96,11 +142,26 @@ const userSchema = new mongoose.Schema(
       total_donated: { type: Number, default: 0 }, // in cents
       total_earned: { type: Number, default: 0 }, // in cents
       referral_count: { type: Number, default: 0 },
+      prayers_sent: { type: Number, default: 0 }, // RG-06/16 tap-to-pray count
+    },
+    // Trust-based Share-to-Earn (Phase 5): how reliably this creator settles
+    // sharer payouts. Raw counters only; derived score via CreatorReliabilityService.
+    creator_reliability: {
+      payouts_confirmed: { type: Number, default: 0 }, // slices the creator marked paid
+      payouts_received: { type: Number, default: 0 }, // slices the sharer confirmed received
+      payouts_disputed: { type: Number, default: 0 }, // slices the creator disputed
+      total_pay_time_hours: { type: Number, default: 0 }, // sum of (paid_at − requested_at), for averaging
+      on_time_count: { type: Number, default: 0 }, // slices paid within the on-time window (7d)
+      total_paid_cents: { type: Number, default: 0 }, // lifetime settled to sharers
+      last_payout_at: { type: Date, default: null },
     },
     preferences: {
       email_notifications: { type: Boolean, default: true },
       marketing_emails: { type: Boolean, default: false },
       newsletter: { type: Boolean, default: false },
+      // Causes the user follows (onboarding Step 3). Stable cause codes from
+      // config/causes.js; powers interest-based campaign matching.
+      interests: { type: [String], default: [] },
     },
     last_login: { type: Date, default: null },
     login_count: { type: Number, default: 0 },
@@ -161,12 +222,127 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+
+    // ── Trust & Verification badges (Profile Level 2) ──────────────────
+    // Derived/aggregated trust state. The authoritative identity review lives
+    // in the IdentityVerification collection; these flags are the fast-read
+    // projection that powers profile badges.
+    verification_badges: {
+      email_verified: { type: Boolean, default: false },
+      phone_verified: { type: Boolean, default: false },
+      identity_verified: { type: Boolean, default: false },
+      community_verified: { type: Boolean, default: false },
+      nonprofit_verified: { type: Boolean, default: false },
+    },
+    // Identity verification tier once approved: null | 'basic' | 'premium'
+    identity_tier: {
+      type: String,
+      enum: [null, 'basic', 'premium'],
+      default: null,
+    },
+    // Composite trust score (0-100), recomputed by VerificationService.
+    trust_score: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 100,
+    },
+
+    // ── Gamification (Profile Level 3 / RG-02, RG-03) ──────────────────
+    gamification: {
+      xp: { type: Number, default: 0 },
+      level: { type: Number, default: 1 },
+      badges: [
+        {
+          code: { type: String, required: true },
+          name: String,
+          icon: String,
+          category: String,
+          earned_at: { type: Date, default: Date.now },
+          _id: false,
+        },
+      ],
+      last_daily_login_xp: { type: Date, default: null },
+
+      // ── RG-04 Daily Streak Rewards ──────────────────────────────────
+      streak: {
+        current: { type: Number, default: 0 }, // consecutive active days
+        longest: { type: Number, default: 0 },
+        last_active_date: { type: Date, default: null }, // last day that counted
+        milestones_reached: { type: [Number], default: [] }, // day-counts already rewarded
+      },
+
+      // ── RG-09 Viral Multiplier (cached snapshot, recomputed on share) ──
+      viral: {
+        tier: { type: String, default: 'Cold' },
+        multiplier: { type: Number, default: 1.0 },
+        conversions_7d: { type: Number, default: 0 },
+        updated_at: { type: Date, default: null },
+      },
+
+      // ── RG-10 Golden Tickets ─────────────────────────────────────────
+      golden_tickets_won: { type: Number, default: 0 },
+      last_golden_ticket_date: { type: Date, default: null },
+      golden_tickets_today: { type: Number, default: 0 },
+      // Temporary share-reward multiplier from a golden ticket boost prize
+      active_boost: {
+        multiplier: { type: Number, default: 1.0 },
+        expires_at: { type: Date, default: null },
+      },
+
+      // ── RG-14 Hope Meter (cached composite score 0-100) ──────────────
+      hope_score: { type: Number, default: 0 },
+    },
+
+    // ── Creator Profile (Profile Level 4) ──────────────────────────────
+    creator_profile: {
+      personal_story: { type: String, maxlength: 5000, default: '' },
+      why_joined: { type: String, maxlength: 2000, default: '' },
+      areas_of_need: { type: [String], default: [] },
+      response_rate: { type: Number, default: 0, min: 0, max: 100 }, // %
+      community_rating: { type: Number, default: 0, min: 0, max: 5 },
+      rating_count: { type: Number, default: 0 },
+    },
+
+    // ── Privacy controls (governs public profile / activity feed) ──────
+    privacy: {
+      profile_visibility: {
+        type: String,
+        enum: ['public', 'private'],
+        default: 'public',
+      },
+      show_activity_feed: { type: Boolean, default: true },
+      show_stats: { type: Boolean, default: true },
+      show_donations: { type: Boolean, default: false },
+      show_location: { type: Boolean, default: true },
+    },
+
+    // Cached profile completion percentage (0-100) and onboarding flag.
+    // Recomputed on profile mutations via recomputeProfileCompletion().
+    profile_completion: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 100,
+    },
+    profile_setup_completed: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },
     toJSON: { virtuals: true },
     toObject: { virtuals: true },
   }
+);
+
+// Unique username — but only for documents where username is an actual string.
+// A partial index (not sparse) is required so that the many users with
+// `username: null` are excluded from the uniqueness constraint entirely.
+userSchema.index(
+  { username: 1 },
+  { unique: true, partialFilterExpression: { username: { $type: 'string' } } }
 );
 
 // Geospatial index for location-based queries
@@ -244,6 +420,7 @@ userSchema.methods.toJSON = function toJSON() {
   delete user.verification_token_expires;
   delete user.password_reset_token;
   delete user.password_reset_expires;
+  delete user.phone_verification;
 
   return user;
 };
@@ -351,6 +528,90 @@ userSchema.methods.unblockUser = function unblockUser() {
   this.blocked_by = null;
   return this.save();
 };
+
+/**
+ * Virtual: full_name
+ * Prefers explicit first/last name, falls back to display_name.
+ */
+userSchema.virtual('full_name').get(function fullName() {
+  const parts = [this.first_name, this.last_name].filter(Boolean);
+  return parts.length ? parts.join(' ') : this.display_name;
+});
+
+/**
+ * The fields that make up the "Basic Profile Setup" checklist and their
+ * relative weight toward the 0-100 completion meter. Identity verification is
+ * weighted heavily because it is the trust cornerstone of the platform.
+ */
+const COMPLETION_WEIGHTS = [
+  { key: 'first_name', weight: 10, has: (u) => !!u.first_name },
+  { key: 'last_name', weight: 10, has: (u) => !!u.last_name },
+  { key: 'username', weight: 10, has: (u) => !!u.username },
+  { key: 'avatar', weight: 15, has: (u) => !!u.avatar_url },
+  { key: 'bio', weight: 10, has: (u) => !!(u.bio && u.bio.trim().length >= 20) },
+  { key: 'location', weight: 10, has: (u) => !!(u.location && u.location.city && u.location.country) },
+  { key: 'email_verified', weight: 10, has: (u) => !!u.verification_badges?.email_verified },
+  { key: 'phone_verified', weight: 10, has: (u) => !!u.verification_badges?.phone_verified },
+  { key: 'identity_verified', weight: 15, has: (u) => !!u.verification_badges?.identity_verified },
+];
+
+/**
+ * Method: recomputeProfileCompletion
+ * Recalculates the cached profile_completion percentage and the
+ * profile_setup_completed flag (basic setup = all non-identity items done).
+ * Does NOT save — callers persist as part of their own write.
+ * @returns {number} completion percentage (0-100)
+ */
+userSchema.methods.recomputeProfileCompletion = function recomputeProfileCompletion() {
+  const total = COMPLETION_WEIGHTS.reduce((sum, f) => sum + f.weight, 0);
+  const earned = COMPLETION_WEIGHTS.reduce((sum, f) => (f.has(this) ? sum + f.weight : sum), 0);
+  const pct = Math.round((earned / total) * 100);
+
+  this.profile_completion = pct;
+
+  // "Basic setup complete" = every checklist item except identity verification.
+  const basicDone = COMPLETION_WEIGHTS
+    .filter((f) => f.key !== 'identity_verified')
+    .every((f) => f.has(this));
+  this.profile_setup_completed = basicDone;
+
+  return pct;
+};
+
+/**
+ * Method: getCompletionChecklist
+ * Returns each completion item with done/weight, for UI meters & AI strength.
+ */
+userSchema.methods.getCompletionChecklist = function getCompletionChecklist() {
+  return COMPLETION_WEIGHTS.map((f) => ({
+    key: f.key,
+    done: !!f.has(this),
+    weight: f.weight,
+  }));
+};
+
+/**
+ * Static: isUsernameAvailable
+ * Case-insensitive availability check, optionally excluding a user (self).
+ * @param {string} username
+ * @param {string} [excludeUserId]
+ * @returns {Promise<boolean>}
+ */
+userSchema.statics.isUsernameAvailable = async function isUsernameAvailable(username, excludeUserId = null) {
+  if (!username) return false;
+  const query = { username: username.toLowerCase().trim(), deleted_at: null };
+  if (excludeUserId) {
+    query._id = { $ne: excludeUserId };
+  }
+  const existing = await this.findOne(query).select('_id').lean();
+  return !existing;
+};
+
+// Indexes for leaderboards (RG-05)
+userSchema.index({ 'gamification.xp': -1 });
+userSchema.index({ 'stats.total_donated': -1 });
+userSchema.index({ 'stats.shares_recorded': -1 });
+userSchema.index({ 'stats.referral_count': -1 });
 
 const User = mongoose.model('User', userSchema);
 

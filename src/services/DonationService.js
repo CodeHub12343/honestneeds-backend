@@ -6,6 +6,7 @@
 const Transaction = require('../models/Transaction');
 const Campaign = require('../models/Campaign');
 const User = require('../models/User');
+const CampaignMetricsService = require('./CampaignMetricsService');
 const winstonLogger = require('../utils/winstonLogger');
 
 class DonationService {
@@ -166,108 +167,73 @@ class DonationService {
    */
   static async getCampaignDonationAnalytics(campaignId, userId) {
     try {
-      // Verify campaign ownership
-      const campaign = await Campaign.findById(campaignId);
-      if (!campaign) {
-        const error = new Error('Campaign not found');
-        error.statusCode = 404;
-        throw error;
+      // Optional ownership check (some callers verify the creator upstream and
+      // omit userId; guard so we never crash on `undefined.toString()`).
+      if (userId) {
+        const campaign = await Campaign.findById(campaignId).select('creator_id').lean();
+        if (!campaign) {
+          const error = new Error('Campaign not found');
+          error.statusCode = 404;
+          throw error;
+        }
+        if (campaign.creator_id.toString() !== userId.toString()) {
+          const error = new Error('Only campaign creator can view analytics');
+          error.statusCode = 403;
+          throw error;
+        }
       }
 
-      if (campaign.creator_id.toString() !== userId.toString()) {
-        const error = new Error('Only campaign creator can view analytics');
-        error.statusCode = 403;
-        throw error;
-      }
-
-      // Get all donations for this campaign
-      const donations = await Transaction.find({
-        campaign_id: campaignId,
-        transaction_type: 'donation',
-        status: { $in: ['verified', 'pending'] }
-      })
-        .populate('supporter_id', 'email full_name')
-        .sort({ created_at: -1 });
-
-      // Calculate metrics
-      const totalDonations = donations.length;
-      const totalRaised = donations.reduce((sum, d) => sum + d.net_amount_cents, 0);
-      const totalFees = donations.reduce((sum, d) => sum + d.platform_fee_cents, 0);
-      const avgDonation = totalDonations > 0 ? totalRaised / totalDonations : 0;
-      const uniqueDonors = new Set(donations.map(d => d.supporter_id._id.toString())).size;
-
-      // Group by date for timeline
-      const timeline = {};
-      donations.forEach(d => {
-        const dateKey = d.created_at.toISOString().split('T')[0];
-        if (!timeline[dateKey]) {
-          timeline[dateKey] = { count: 0, amount_cents: 0 };
-        }
-        timeline[dateKey].count += 1;
-        timeline[dateKey].amount_cents += d.net_amount_cents;
+      // Delegate to the canonical metrics service (R-3). Aggregation-based donor
+      // names are null-safe, so a deleted donor no longer crashes the call (F-5).
+      // "Raised" is GROSS verified-only — consistent with the meter (F-6).
+      const m = await CampaignMetricsService.computeDonationMetrics(campaignId, {
+        timeframe: 'all',
+        includeBreakdown: true,
       });
-
-      // Get top donors
-      const donorAggregates = {};
-      donations.forEach(d => {
-        const donorId = d.supporter_id._id.toString();
-        if (!donorAggregates[donorId]) {
-          donorAggregates[donorId] = {
-            donorName: d.supporter_id.full_name,
-            donorEmail: d.supporter_id.email,
-            totalAmount: 0,
-            count: 0,
-            firstDonation: d.created_at,
-            lastDonation: d.created_at
-          };
-        }
-        donorAggregates[donorId].totalAmount += d.net_amount_cents;
-        donorAggregates[donorId].count += 1;
-        donorAggregates[donorId].lastDonation = d.created_at;
-      });
-
-      const topDonors = Object.values(donorAggregates)
-        .sort((a, b) => b.totalAmount - a.totalAmount)
-        .slice(0, 10)
-        .map(d => ({
-          ...d,
-          totalAmount: (d.totalAmount / 100).toFixed(2)
-        }));
 
       winstonLogger.info(`Retrieved campaign analytics for campaign ${campaignId}`);
 
       return {
         success: true,
         data: {
-          campaignId,
-          campaignTitle: campaign.title,
+          campaignId: m.campaignId,
+          campaignTitle: m.campaignTitle,
           donations: {
-            total_count: totalDonations,
-            unique_donors: uniqueDonors,
-            total_raised_cents: totalRaised,
-            total_raised_dollars: (totalRaised / 100).toFixed(2),
-            total_fees_cents: totalFees,
-            total_fees_dollars: (totalFees / 100).toFixed(2),
-            avg_donation_cents: Math.round(avgDonation),
-            avg_donation_dollars: (avgDonation / 100).toFixed(2)
+            total_count: m.totalDonations,
+            unique_donors: m.uniqueDonors,
+            total_raised_cents: m.raisedCents,
+            total_raised_dollars: (m.raisedCents / 100).toFixed(2),
+            total_fees_cents: m.feesCents,
+            total_fees_dollars: (m.feesCents / 100).toFixed(2),
+            avg_donation_cents: m.avgCents,
+            avg_donation_dollars: (m.avgCents / 100).toFixed(2),
+            // Pending pipeline (awaiting confirmation) — not part of raised.
+            pending_count: m.pending.count,
+            pending_cents: m.pending.amountCents,
+            pending_dollars: (m.pending.amountCents / 100).toFixed(2),
           },
-          timeline: Object.entries(timeline)
-            .map(([date, data]) => ({
-              date,
-              count: data.count,
-              amount: (data.amount_cents / 100).toFixed(2)
-            }))
-            .reverse(),
-          topDonors,
-          recentDonations: donations.slice(0, 20).map(d => ({
-            id: d._id,
-            donorName: d.supporter_id.full_name,
-            amount: (d.net_amount_cents / 100).toFixed(2),
-            paymentMethod: d.payment_method,
+          timeline: m.timeline.map((t) => ({
+            date: t.date,
+            count: t.count,
+            amount: (t.amountCents / 100).toFixed(2),
+          })),
+          topDonors: m.topDonors.map((d) => ({
+            donorName: d.donorName,
+            donorEmail: d.donorEmail,
+            totalAmount: (d.amountCents / 100).toFixed(2),
+            count: d.count,
+            firstDonation: d.firstDonation,
+            lastDonation: d.lastDonation,
+          })),
+          recentDonations: m.recent.map((d) => ({
+            id: d.id,
+            donorName: d.donorName,
+            amount: (d.amountCents / 100).toFixed(2),
+            paymentMethod: d.paymentMethod,
             status: d.status,
-            date: d.created_at
-          }))
-        }
+            date: d.date,
+          })),
+        },
       };
     } catch (error) {
       winstonLogger.error(`Campaign donation analytics error: ${error.message}`);
@@ -286,176 +252,78 @@ class DonationService {
    */
   static async getCampaignDonationMetrics(campaignId, timeframe = 'all', includeBreakdown = true) {
     try {
-      const campaign = await Campaign.findById(campaignId);
-      if (!campaign) {
-        const error = new Error('Campaign not found');
-        error.statusCode = 404;
-        throw error;
-      }
+      // Delegate to the canonical metrics service (R-3). This fixes F-4 (funded %
+      // was always 0 due to reading a non-existent `goals.goal_amount_cents`) and
+      // F-6 (raised is now GROSS verified-only, consistent with every other read).
+      const m = await CampaignMetricsService.computeDonationMetrics(campaignId, {
+        timeframe,
+        includeBreakdown,
+      });
 
-      // Build date filter based on timeframe
-      const dateFilter = {};
-      const now = new Date();
-      switch (timeframe) {
-        case 'today':
-          dateFilter.$gte = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-          break;
-        case 'week':
-          dateFilter.$gte = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-          break;
-        case 'month':
-          dateFilter.$gte = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-          break;
-        case 'all':
-        default:
-          // No date filter
-          break;
-      }
-
-      const matchQuery = {
-        campaign_id: campaign._id,
-        transaction_type: 'donation',
-        status: { $in: ['verified', 'pending'] }
-      };
-
-      if (Object.keys(dateFilter).length > 0) {
-        matchQuery.created_at = dateFilter;
-      }
-
-      // Aggregate donation metrics
-      const aggregation = [
-        { $match: matchQuery },
-        {
-          $facet: {
-            summary: [
-              {
-                $group: {
-                  _id: null,
-                  totalDonations: { $sum: 1 },
-                  totalRaisedCents: { $sum: '$amount_cents' },
-                  averageDonationCents: { $avg: '$amount_cents' },
-                  largestDonationCents: { $max: '$amount_cents' },
-                  smallestDonationCents: { $min: '$amount_cents' },
-                  uniqueDonors: { $addToSet: '$supporter_id' }
-                }
-              }
-            ],
-            byPaymentMethod: includeBreakdown ? [
-              {
-                $group: {
-                  _id: '$payment_method',
-                  count: { $sum: 1 },
-                  amount: { $sum: '$amount_cents' }
-                }
-              },
-              { $sort: { amount: -1 } }
-            ] : [],
-            byStatus: includeBreakdown ? [
-              {
-                $group: {
-                  _id: '$status',
-                  count: { $sum: 1 },
-                  amount: { $sum: '$amount_cents' }
-                }
-              },
-              { $sort: { count: -1 } }
-            ] : [],
-            recentDonations: [
-              { $sort: { created_at: -1 } },
-              { $limit: 10 },
-              {
-                $lookup: {
-                  from: 'users',
-                  localField: 'supporter_id',
-                  foreignField: '_id',
-                  as: 'donor'
-                }
-              },
-              {
-                $project: {
-                  amount: { $divide: ['$amount_cents', 100] },
-                  paymentMethod: 1,
-                  status: 1,
-                  date: '$created_at',
-                  donor: { $arrayElemAt: ['$donor.full_name', 0] }
-                }
-              }
-            ]
-          }
-        }
-      ];
-
-      const results = await Transaction.aggregate(aggregation);
-      const metrics = results[0];
-
-      // Calculate funded percentage
-      let fundedPercentage = 0;
-      let goalAmount = 0;
-      if (campaign.goals && campaign.goals.goal_amount_cents) {
-        goalAmount = campaign.goals.goal_amount_cents;
-        fundedPercentage = metrics.summary[0]
-          ? Math.min(100, Math.round((metrics.summary[0].totalRaisedCents / goalAmount) * 100))
-          : 0;
-      }
-
-      // Build response
       const response = {
         success: true,
         data: {
-          campaignId: campaignId,
-          timeframe: timeframe,
+          campaignId: m.campaignId,
+          timeframe: m.timeframe,
           metrics: {
-            totalDonations: metrics.summary[0]?.totalDonations || 0,
+            totalDonations: m.totalDonations,
             totalRaised: {
-              cents: metrics.summary[0]?.totalRaisedCents || 0,
-              dollars: ((metrics.summary[0]?.totalRaisedCents || 0) / 100).toFixed(2)
+              cents: m.raisedCents,
+              dollars: (m.raisedCents / 100).toFixed(2),
             },
-            uniqueDonors: metrics.summary[0]?.uniqueDonors?.length || 0,
+            // Pending (awaiting creator confirmation) — surfaced, never counted in raised.
+            pendingDonations: {
+              count: m.pending.count,
+              cents: m.pending.amountCents,
+              dollars: (m.pending.amountCents / 100).toFixed(2),
+            },
+            uniqueDonors: m.uniqueDonors,
             averageDonation: {
-              cents: Math.round(metrics.summary[0]?.averageDonationCents || 0),
-              dollars: ((metrics.summary[0]?.averageDonationCents || 0) / 100).toFixed(2)
+              cents: m.avgCents,
+              dollars: (m.avgCents / 100).toFixed(2),
             },
             largestDonation: {
-              cents: metrics.summary[0]?.largestDonationCents || 0,
-              dollars: ((metrics.summary[0]?.largestDonationCents || 0) / 100).toFixed(2)
+              cents: m.largestCents,
+              dollars: (m.largestCents / 100).toFixed(2),
             },
             smallestDonation: {
-              cents: metrics.summary[0]?.smallestDonationCents || 0,
-              dollars: ((metrics.summary[0]?.smallestDonationCents || 0) / 100).toFixed(2)
+              cents: m.smallestCents,
+              dollars: (m.smallestCents / 100).toFixed(2),
+            },
+            totalFees: {
+              cents: m.feesCents,
+              dollars: (m.feesCents / 100).toFixed(2),
             },
             fundProgress: {
               goalAmount: {
-                cents: goalAmount,
-                dollars: (goalAmount / 100).toFixed(2)
+                cents: m.goalAmountCents,
+                dollars: (m.goalAmountCents / 100).toFixed(2),
               },
-              fundedPercentage: fundedPercentage
-            }
-          }
-        }
+              fundedPercentage: m.fundedPercentage,
+            },
+          },
+        },
       };
 
-      // Add breakdown if requested
       if (includeBreakdown) {
         response.data.breakdown = {
-          byPaymentMethod: metrics.byPaymentMethod?.reduce((acc, method) => {
-            acc[method._id] = {
+          byPaymentMethod: m.byPaymentMethod.reduce((acc, method) => {
+            acc[method.method] = {
               count: method.count,
-              amount: (method.amount / 100).toFixed(2)
+              amount: (method.amountCents / 100).toFixed(2),
             };
             return acc;
-          }, {}) || {},
-          byStatus: metrics.byStatus?.reduce((acc, status) => {
-            acc[status._id] = {
-              count: status.count,
-              amount: (status.amount / 100).toFixed(2)
-            };
-            return acc;
-          }, {}) || {}
+          }, {}),
         };
       }
 
-      // Add recent donations
-      response.data.recentDonations = metrics.recentDonations || [];
+      response.data.recentDonations = m.recent.map((d) => ({
+        amount: d.amountCents / 100,
+        paymentMethod: d.paymentMethod,
+        status: d.status,
+        date: d.date,
+        donor: d.donorName,
+      }));
 
       return response;
     } catch (error) {
@@ -473,7 +341,7 @@ class DonationService {
   static async generateDonationReceipt(donationId, userId) {
     try {
       const donation = await Transaction.findById(donationId)
-        .populate('campaign_id', 'title description creator_id')
+        .populate('campaign_id', 'title description creator_id tax_deductible tax_id')
         .populate('supporter_id', 'email full_name')
         .populate('creator_id', 'full_name email');
 
@@ -483,23 +351,34 @@ class DonationService {
         throw error;
       }
 
+      // F-5: null-guard populated refs (donor may have been deleted).
+      const supporter = donation.supporter_id;
+      const campaign = donation.campaign_id;
+      const creator = donation.creator_id;
+
       // Authorization: owner or admin
-      if (donation.supporter_id._id.toString() !== userId.toString()) {
+      if (!supporter || supporter._id.toString() !== userId.toString()) {
         const error = new Error('Can only view own receipts');
         error.statusCode = 403;
         throw error;
       }
 
+      const campaignTitle = campaign?.title || 'Unknown campaign';
+
+      // U-8: deductibility is a verified campaign/org attribute, not a blanket
+      // assumption. Only claim it (and surface the tax ID) when truly deductible.
+      const isDeductible = campaign?.tax_deductible === true;
+
       // Generate receipt
       const receipt = {
         receiptNumber: donation.transaction_id,
         receiptDate: donation.created_at,
-        donorName: donation.supporter_id.full_name,
-        donorEmail: donation.supporter_id.email,
-        campaignTitle: donation.campaign_id.title,
-        campaignDescription: donation.campaign_id.description,
-        creatorName: donation.creator_id.full_name,
-        creatorEmail: donation.creator_id.email,
+        donorName: supporter.full_name || 'Donor',
+        donorEmail: supporter.email || null,
+        campaignTitle,
+        campaignDescription: campaign?.description || null,
+        creatorName: creator?.full_name || 'Campaign creator',
+        creatorEmail: creator?.email || null,
         donationAmount: {
           gross_cents: donation.amount_cents,
           gross_dollars: (donation.amount_cents / 100).toFixed(2),
@@ -510,9 +389,12 @@ class DonationService {
         },
         paymentMethod: donation.payment_method,
         status: donation.status,
-        taxDeductible: true, // Set based on campaign type
-        taxId: 'TBD', // Set based on organization
-        notes: `Thank you for your generous donation to ${donation.campaign_id.title}!`
+        taxDeductible: isDeductible,
+        taxId: isDeductible ? (campaign?.tax_id || null) : null,
+        deductibilityNotice: isDeductible
+          ? 'This donation may be tax-deductible. Consult your tax advisor; no goods or services were provided in exchange.'
+          : 'This is a peer-to-peer gift and is generally NOT tax-deductible.',
+        notes: `Thank you for your generous donation to ${campaignTitle}!`
       };
 
       winstonLogger.info(`Generated receipt for donation ${donationId}`);
@@ -592,7 +474,7 @@ class DonationService {
       if (notifyDonor) {
         const donor = await User.findById(donation.supporter_id);
         const emailService = require('./emailService');
-        if (emailService && donor.email) {
+        if (emailService && donor?.email) {
           await emailService.sendRefundEmail(donor.email, {
             donationId: donation.transaction_id,
             amount: (donation.amount_cents / 100).toFixed(2),
@@ -655,14 +537,14 @@ class DonationService {
         .sort({ created_at: -1 })
         .lean();
 
-      // Format for export
+      // Format for export (F-5: null-guard refs to deleted donors/campaigns).
       const exportData = donations.map(d => ({
         transactionId: d.transaction_id,
         date: d.created_at,
-        donor: d.supporter_id.full_name,
-        donorEmail: d.supporter_id.email,
-        campaign: d.campaign_id.title,
-        creator: d.creator_id.full_name,
+        donor: d.supporter_id?.full_name || 'Deleted user',
+        donorEmail: d.supporter_id?.email || null,
+        campaign: d.campaign_id?.title || 'Unknown campaign',
+        creator: d.creator_id?.full_name || 'Unknown creator',
         amountGross: (d.amount_cents / 100).toFixed(2),
         platformFee: (d.platform_fee_cents / 100).toFixed(2),
         amountNet: (d.net_amount_cents / 100).toFixed(2),
@@ -759,11 +641,17 @@ class DonationService {
           donations: donations.map(d => ({
             id: d._id,
             transactionId: d.transaction_id,
-            campaignId: d.campaign_id._id,
-            campaignTitle: d.campaign_id.title,
+            // campaign_id may be null when the referenced campaign was deleted,
+            // or a raw ObjectId when populate found no matching document.
+            campaignId: d.campaign_id?._id || d.campaign_id || null,
+            campaignTitle: d.campaign_id?.title || 'Unknown campaign',
             amount: d.amount_cents,
             status: d.status,
             paymentMethod: d.payment_method,
+            // CE-2: refund-request state for the donor dashboard list view.
+            refundRequestStatus: d.refund_request?.status && d.refund_request.status !== 'none'
+              ? d.refund_request.status
+              : null,
             createdAt: d.created_at
           })),
           pagination: {
@@ -804,8 +692,12 @@ class DonationService {
         };
       }
 
+      // F-5: null-guard populated refs (donor/campaign may have been deleted).
+      const supporter = donation.supporter_id;
+      const campaign = donation.campaign_id;
+
       // Check access: owner or admin
-      if (!isAdmin && donation.supporter_id._id.toString() !== userId.toString()) {
+      if (!isAdmin && (!supporter || supporter._id.toString() !== userId.toString())) {
         throw {
           statusCode: 403,
           message: 'You can only view your own donations'
@@ -817,16 +709,28 @@ class DonationService {
         data: {
           id: donation._id,
           transactionId: donation.transaction_id,
-          campaignId: donation.campaign_id._id,
-          campaignTitle: donation.campaign_id.title,
-          donorName: donation.supporter_id.full_name,
-          donorEmail: donation.supporter_id.email,
+          campaignId: campaign?._id || donation.campaign_id || null,
+          campaignTitle: campaign?.title || 'Unknown campaign',
+          donorName: supporter?.full_name || 'Deleted user',
+          donorEmail: supporter?.email || null,
           amount: (donation.amount_cents / 100).toFixed(2),
           fee: (donation.platform_fee_cents / 100).toFixed(2),
           netAmount: (donation.net_amount_cents / 100).toFixed(2),
           status: donation.status,
           paymentMethod: donation.payment_method,
           message: donation.notes.find(n => n.action === 'message')?.details?.message || '',
+          // CE-2 / CE-7: surface refund-request state for the donor dashboard.
+          refundRequest: donation.refund_request?.status && donation.refund_request.status !== 'none'
+            ? {
+                status: donation.refund_request.status,
+                reason: donation.refund_request.reason,
+                requestedAt: donation.refund_request.requested_at,
+                decidedAt: donation.refund_request.decided_at,
+                decisionNote: donation.refund_request.decision_note,
+              }
+            : null,
+          canRequestRefund: ['pending', 'verified'].includes(donation.status) &&
+            (!donation.refund_request || ['none', 'declined'].includes(donation.refund_request.status)),
           date: donation.created_at
         }
       };

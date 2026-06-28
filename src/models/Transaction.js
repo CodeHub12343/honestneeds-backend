@@ -46,7 +46,7 @@ const transactionSchema = new mongoose.Schema(
     platform_fee_cents: {
       type: Number,
       required: true,
-      // Calculated as 20% of amount
+      // Calculated via feeEngine.calculateDonationFee (canonical donation rate).
     },
     net_amount_cents: {
       type: Number,
@@ -55,13 +55,23 @@ const transactionSchema = new mongoose.Schema(
     },
     payment_method: {
       type: String,
-      enum: ['paypal', 'stripe', 'bank_transfer', 'credit_card', 'check', 'money_order', 'venmo'],
+      enum: ['paypal', 'stripe', 'bank_transfer', 'credit_card', 'check', 'money_order', 'venmo', 'internal_wallet'],
       required: true,
     },
     // Transaction status
+    //
+    // Share-to-Earn (trust-based, 2026-06-22): rewards are created as 'owed'
+    // (immediately claimable — no 30-day money hold) and move to 'paid' once the
+    // creator settles the sharer directly. Legacy escrow statuses 'pending_hold'
+    // (on 30-day hold) and 'approved' (cleared) are retained for back-compat with
+    // rewards created before the pivot.
     status: {
       type: String,
-      enum: ['pending', 'verified', 'failed', 'refunded', 'pending_hold', 'approved', 'rejected'],
+      enum: [
+        'pending', 'verified', 'failed', 'refunded', 'rejected',
+        'pending_hold', 'approved', // legacy escrow reward lifecycle
+        'owed', 'paid', // trust-based reward lifecycle
+      ],
       default: 'pending',
       index: true,
     },
@@ -75,6 +85,27 @@ const transactionSchema = new mongoose.Schema(
         },
         message: 'Proof URL must be a valid HTTP(S) URL',
       },
+    },
+    // CF-2: Donor self-reports the off-platform payment has been sent.
+    // Manual payments flow record(pending) → donor pays creator directly →
+    // donor marks sent (+optional proof) → creator confirms receipt (verified).
+    payment_sent_at: {
+      type: Date,
+      default: null,
+    },
+    // Referral code captured at donation time. Share-to-Earn conversion is
+    // processed at *verification* time (not record time) so rewards are only
+    // ever created for confirmed, real money — never for unverified intents.
+    referral_code: {
+      type: String,
+      default: null,
+    },
+    // Who confirmed receipt for a manual donation: the campaign creator
+    // ("I received this") or a platform admin.
+    confirmed_by_role: {
+      type: String,
+      enum: ['creator', 'admin', null],
+      default: null,
     },
     // Admin verification
     verified_by: {
@@ -119,6 +150,22 @@ const transactionSchema = new mongoose.Schema(
       ref: 'User',
     },
     refunded_at: Date,
+
+    // CE-7: donor-initiated refund request (manual, creator-actioned). The donor
+    // asks for a refund; the creator/admin approves (money returned off-platform,
+    // donation reversed) or declines.
+    refund_request: {
+      status: {
+        type: String,
+        enum: ['none', 'requested', 'approved', 'declined'],
+        default: 'none',
+      },
+      reason: { type: String, maxlength: 1000, default: null },
+      requested_at: { type: Date, default: null },
+      decided_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+      decided_at: { type: Date, default: null },
+      decision_note: { type: String, maxlength: 1000, default: null },
+    },
     // Audit trail
     notes: [
       {
@@ -154,6 +201,22 @@ const transactionSchema = new mongoose.Schema(
     // IP and user agent for fraud detection
     ip_address: String,
     user_agent: String,
+    device_info: String,
+    // Share-to-Earn: links a 'share_reward' transaction back to the donation
+    // that earned it and the share that referred it. ShareRewardService's
+    // idempotency guard queries related_donation_id to avoid double-paying a
+    // reward for the same donation — these fields MUST stay declared here or
+    // Mongoose silently strips them on save and the guard can never match.
+    related_donation_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Transaction',
+      index: true,
+    },
+    related_share_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ShareRecord',
+      index: true,
+    },
     // Timestamps
     created_at: {
       type: Date,
@@ -220,12 +283,19 @@ transactionSchema.methods.addNote = function (action, detail, performedBy) {
   return this;
 };
 
-// Method to verify transaction
-transactionSchema.methods.verify = function (adminId) {
+// Method to verify transaction.
+// `role` records whether the campaign creator confirmed receipt of the manual
+// payment or a platform admin did. Defaults to 'admin' for backward-compat.
+transactionSchema.methods.verify = function (verifierId, role = 'admin') {
   this.status = 'verified';
-  this.verified_by = adminId;
+  this.verified_by = verifierId;
   this.verified_at = new Date();
-  this.addNote('verified', 'Transaction verified by admin', adminId);
+  this.confirmed_by_role = role === 'creator' ? 'creator' : 'admin';
+  this.addNote(
+    'verified',
+    `Payment receipt confirmed by ${this.confirmed_by_role}`,
+    verifierId
+  );
   return this;
 };
 

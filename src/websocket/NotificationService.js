@@ -6,6 +6,7 @@
 
 const WebSocket = require('ws');
 const winstonLogger = require('../utils/winstonLogger');
+const { verifyToken } = require('../utils/jwt');
 
 class WebSocketNotificationService {
   constructor() {
@@ -32,13 +33,33 @@ class WebSocketNotificationService {
    */
   handleConnection(ws, req) {
     try {
-      // Extract user ID from query token
+      // Authenticate the connection: the `token` query param must be a valid
+      // JWT. The userId is derived from the verified token — never trusted
+      // from the client directly (prevents impersonation).
       const url = new URL(req.url, `http://${req.headers.host}`);
-      const userId = url.searchParams.get('token');
+      const token = url.searchParams.get('token');
+
+      if (!token) {
+        winstonLogger.warn('❌ WebSocket connection rejected: missing token');
+        ws.close(1008, 'Missing authentication token');
+        return;
+      }
+
+      let userId;
+      try {
+        const decoded = verifyToken(token);
+        userId = decoded.userId;
+      } catch (authError) {
+        winstonLogger.warn('❌ WebSocket connection rejected: invalid token', {
+          error: authError.message,
+        });
+        ws.close(1008, 'Invalid or expired authentication token');
+        return;
+      }
 
       if (!userId) {
-        winstonLogger.warn('❌ WebSocket connection rejected: No user ID');
-        ws.close(1008, 'Missing user ID');
+        winstonLogger.warn('❌ WebSocket connection rejected: token missing userId');
+        ws.close(1008, 'Invalid token payload');
         return;
       }
 
@@ -134,6 +155,25 @@ class WebSocketNotificationService {
         }
         break;
 
+      case 'typing':
+        // Relay a transient typing indicator to the other participant.
+        // userId is the authenticated sender (trusted); to_user_id is the recipient.
+        if (message.to_user_id && message.conversation_id) {
+          this.notifyUser(
+            message.to_user_id.toString(),
+            {
+              type: 'typing',
+              data: {
+                conversation_id: message.conversation_id,
+                user_id: userId,
+                is_typing: !!message.is_typing,
+              },
+            },
+            { queueIfOffline: false }
+          );
+        }
+        break;
+
       default:
         winstonLogger.warn('Unknown WebSocket message type', {
           userId,
@@ -145,12 +185,15 @@ class WebSocketNotificationService {
   /**
    * Send notification to specific user
    */
-  notifyUser(userId, message) {
+  notifyUser(userId, message, options = {}) {
+    const { queueIfOffline = true } = options;
     const userConnections = this.clients.get(userId);
 
     if (!userConnections || userConnections.size === 0) {
-      // Queue message for when user comes online
-      this.queueMessage(userId, message);
+      // Queue message for when user comes online (skip for transient frames)
+      if (queueIfOffline) {
+        this.queueMessage(userId, message);
+      }
       return false;
     }
 

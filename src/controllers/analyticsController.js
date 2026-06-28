@@ -4,6 +4,8 @@
  */
 
 const analyticsService = require('../services/analyticsService');
+const advancedAnalyticsService = require('../services/AdvancedAnalyticsService');
+const BusinessProfile = require('../models/BusinessProfile');
 const analyticsCache = require('../utils/analyticsCache');
 const Campaign = require('../models/Campaign');
 const Transaction = require('../models/Transaction');
@@ -12,6 +14,14 @@ const User = require('../models/User');
 const QRCode = require('../models/QRCode');
 const winstonLogger = require('../utils/winstonLogger');
 const QRCodeLib = require('qrcode');
+
+/**
+ * Whether the request belongs to an admin. The JWT attaches a `roles` array
+ * (see authMiddleware), so we check membership there rather than a singular role.
+ */
+function isAdmin(req) {
+  return Array.isArray(req.user?.roles) && req.user.roles.includes('admin');
+}
 
 const AnalyticsController = {
   /**
@@ -1743,6 +1753,199 @@ const AnalyticsController = {
       res.status(error.statusCode || 500).json({
         success: false,
         message: error.message || 'Failed to track QR scan',
+      });
+    }
+  },
+
+  // ============================================================
+  // PRD §3.10 — ADVANCED ANALYTICS (AN-02, AN-04..AN-09)
+  // ============================================================
+
+  /**
+   * AN-02 — Platform Analytics (admin)
+   * GET /api/analytics/platform?period=month
+   * @access Admin only
+   */
+  async getPlatformAnalytics(req, res) {
+    try {
+      if (!isAdmin(req)) {
+        return res.status(403).json({ success: false, message: 'Forbidden: Admin access required' });
+      }
+      const { period = 'month' } = req.query;
+      const data = await advancedAnalyticsService.getPlatformAnalytics({ period });
+      return res.status(200).json({ success: true, data });
+    } catch (error) {
+      winstonLogger.error('Error getting platform analytics', { error: error.message, stack: error.stack });
+      return res.status(error.statusCode || 500).json({
+        success: false,
+        message: error.message || 'Failed to retrieve platform analytics',
+      });
+    }
+  },
+
+  /**
+   * AN-04 — Donor Analytics
+   * GET /api/analytics/donor?period=all
+   * @access Authenticated donor (self); admins may pass ?userId=
+   */
+  async getDonorAnalytics(req, res) {
+    try {
+      const requesterId = req.user?.id;
+      if (!requesterId) {
+        return res.status(401).json({ success: false, message: 'Unauthorized: Authentication required' });
+      }
+      const { period = 'all', userId } = req.query;
+      const targetId = userId && isAdmin(req) ? userId : requesterId;
+      const data = await advancedAnalyticsService.getDonorAnalytics(targetId, { period });
+      return res.status(200).json({ success: true, data });
+    } catch (error) {
+      winstonLogger.error('Error getting donor analytics', {
+        error: error.message,
+        userId: req.user?.id,
+        stack: error.stack,
+      });
+      return res.status(error.statusCode || 500).json({
+        success: false,
+        message: error.message || 'Failed to retrieve donor analytics',
+      });
+    }
+  },
+
+  /**
+   * AN-05 — Business Impact Analytics
+   * GET /api/analytics/business/:businessId/impact
+   * @access Business owner or admin
+   */
+  async getBusinessImpactAnalytics(req, res) {
+    try {
+      const requesterId = req.user?.id;
+      if (!requesterId) {
+        return res.status(401).json({ success: false, message: 'Unauthorized: Authentication required' });
+      }
+
+      const { businessId } = req.params;
+      const business = await BusinessProfile.findById(businessId).select('user_id').lean();
+      if (!business) {
+        return res.status(404).json({ success: false, message: 'Business profile not found' });
+      }
+
+      if (business.user_id.toString() !== requesterId.toString() && !isAdmin(req)) {
+        return res.status(403).json({
+          success: false,
+          message: 'Forbidden: You do not own this business profile',
+        });
+      }
+
+      const data = await advancedAnalyticsService.getBusinessImpactAnalytics(businessId);
+      return res.status(200).json({ success: true, data });
+    } catch (error) {
+      winstonLogger.error('Error getting business impact analytics', {
+        error: error.message,
+        businessId: req.params.businessId,
+        stack: error.stack,
+      });
+      return res.status(error.statusCode || 500).json({
+        success: false,
+        message: error.message || 'Failed to retrieve business impact analytics',
+      });
+    }
+  },
+
+  /**
+   * AN-06 — Sponsor ROI Analytics
+   * GET /api/analytics/sponsor/roi
+   * @access Authenticated sponsor (self); admins may pass ?userId=
+   */
+  async getSponsorROIAnalytics(req, res) {
+    try {
+      const requesterId = req.user?.id;
+      if (!requesterId) {
+        return res.status(401).json({ success: false, message: 'Unauthorized: Authentication required' });
+      }
+      const { userId } = req.query;
+      const targetId = userId && isAdmin(req) ? userId : requesterId;
+      const data = await advancedAnalyticsService.getSponsorROIAnalytics(targetId);
+      return res.status(200).json({ success: true, data });
+    } catch (error) {
+      winstonLogger.error('Error getting sponsor ROI analytics', {
+        error: error.message,
+        userId: req.user?.id,
+        stack: error.stack,
+      });
+      return res.status(error.statusCode || 500).json({
+        success: false,
+        message: error.message || 'Failed to retrieve sponsor ROI analytics',
+      });
+    }
+  },
+
+  /**
+   * AN-07 — Platform Impact Dashboard (public)
+   * GET /api/analytics/impact
+   * @access Public
+   */
+  async getPublicImpactDashboard(req, res) {
+    try {
+      const data = await advancedAnalyticsService.getPublicImpactDashboard();
+      return res.status(200).json({ success: true, data });
+    } catch (error) {
+      winstonLogger.error('Error getting public impact dashboard', {
+        error: error.message,
+        stack: error.stack,
+      });
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to retrieve public impact dashboard',
+      });
+    }
+  },
+
+  /**
+   * AN-08 — City/Region Impact Reports
+   * GET /api/analytics/regions?groupBy=state&country=US&state=CA&limit=50
+   * @access Public
+   */
+  async getRegionImpactReport(req, res) {
+    try {
+      const { groupBy = 'state', country, state, limit } = req.query;
+      const data = await advancedAnalyticsService.getRegionImpactReport({
+        groupBy,
+        country,
+        state,
+        limit,
+      });
+      return res.status(200).json({ success: true, data });
+    } catch (error) {
+      winstonLogger.error('Error getting region impact report', {
+        error: error.message,
+        stack: error.stack,
+      });
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to retrieve region impact report',
+      });
+    }
+  },
+
+  /**
+   * AN-09 — AI Viral Score Predictor
+   * GET /api/analytics/campaigns/:id/viral-score
+   * @access Public
+   */
+  async getViralScorePrediction(req, res) {
+    try {
+      const { id } = req.params;
+      const data = await advancedAnalyticsService.getViralScorePrediction(id);
+      return res.status(200).json({ success: true, data });
+    } catch (error) {
+      winstonLogger.error('Error getting viral score prediction', {
+        error: error.message,
+        campaignId: req.params.id,
+        stack: error.stack,
+      });
+      return res.status(error.statusCode || 500).json({
+        success: false,
+        message: error.message || 'Failed to retrieve viral score prediction',
       });
     }
   },

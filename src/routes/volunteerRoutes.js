@@ -30,6 +30,7 @@
 const router = require('express').Router();
 const volunteerController = require('../controllers/VolunteerController');
 const volunteerOfferController = require('../controllers/VolunteerOfferController');
+const programController = require('../controllers/VolunteerProgramController');
 const { authMiddleware } = require('../middleware/authMiddleware');
 
 /**
@@ -264,6 +265,42 @@ router.patch('/offers/:offerId/complete', authMiddleware, volunteerOfferControll
 router.post('/', authMiddleware, volunteerController.registerVolunteer);
 
 /**
+ * ===========================
+ * VOLUNTEER PROGRAM ROUTES (VO-03..VO-07)
+ * Static prefixes — MUST be declared before the `/:id` param routes below.
+ * ===========================
+ */
+
+// VO-05: Leaderboards (public). ?metric=hours|xp&type=&limit=
+router.get('/leaderboard', programController.getLeaderboard);
+
+// VO-04: Current user's volunteer XP/level/badge progress.
+router.get('/me/progress', authMiddleware, programController.getMyProgress);
+
+// Current user's assignment invites inbox. ?status=requested|accepted|...
+router.get('/me/assignments', authMiddleware, volunteerController.listMyAssignments);
+
+// Assignments the current user has sent as a campaign owner/employer.
+router.get('/me/sent-assignments', authMiddleware, volunteerController.listSentAssignments);
+
+// VO-03: Hour logging.
+router.post('/hours', authMiddleware, programController.logHours);
+router.get('/hours/mine', authMiddleware, programController.listMyHourLogs);
+router.get('/hours/verification', authMiddleware, programController.listLogsForVerification);
+router.post('/hours/:logId/cancel', authMiddleware, programController.cancelHourLog);
+// VO-03 + VO-06: Verify/reject a logged hour (creator/business/admin).
+router.post('/hours/:logId/verify', authMiddleware, programController.verifyHourLog);
+
+// VO-07: Reference letters.
+router.get('/references/public/:token', programController.getPublicReference);
+router.get('/references/mine', authMiddleware, programController.listMyReferences);
+router.get('/references/requests', authMiddleware, programController.listReferenceRequests);
+router.post('/references/request', authMiddleware, programController.requestReference);
+router.post('/references/issue', authMiddleware, programController.issueReference);
+router.post('/references/:letterId/decline', authMiddleware, programController.declineReference);
+router.patch('/references/:letterId/visibility', authMiddleware, programController.setReferenceVisibility);
+
+/**
  * @route   GET /:id
  * @desc    Get volunteer profile details with user information
  * @access  Public
@@ -383,6 +420,9 @@ router.post('/:id/request-assignment', authMiddleware, volunteerController.creat
  * }
  */
 router.post('/:id/accept', authMiddleware, volunteerController.acceptAssignmentNew);
+
+// Volunteer declines an assignment invite (requested -> rejected).
+router.post('/:id/decline', authMiddleware, volunteerController.declineAssignmentNew);
 
 /**
  * @route   POST /:id/complete
