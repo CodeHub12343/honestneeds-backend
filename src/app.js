@@ -93,13 +93,16 @@ const corsOptions = {
         'https://honestneeds-*.onrender.com', // Render preview deployments
         'https://honestneeds.vercel.app', // Legacy Vercel production
         'https://honestneeds-*.vercel.app', // Legacy Vercel preview deployments
+        'https://honestneeds-production-5454.up.railway.app', // Railway production
+        'https://honestneeds-*.up.railway.app', // Railway preview deployments
       ];
-      
+
       // Check if origin matches allowed list (exact match or wildcard pattern)
-      const isAllowed = !origin || 
+      const isAllowed = !origin ||
                         allowedOrigins.includes(origin) ||
                         /^https:\/\/honestneeds-.*\.onrender\.com$/.test(origin) ||
-                        /^https:\/\/honestneeds-.*\.vercel\.app$/.test(origin);
+                        /^https:\/\/honestneeds-.*\.vercel\.app$/.test(origin) ||
+                        /^https:\/\/honestneeds-.*\.up\.railway\.app$/.test(origin);
       
       if (isAllowed) {
         logger.debug(`✅ CORS allowed origin: ${origin}`);
