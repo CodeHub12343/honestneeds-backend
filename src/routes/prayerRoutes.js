@@ -54,6 +54,39 @@ const upload = multer({
 });
 
 /**
+ * Resolve the :campaignId param to a canonical Mongo _id.
+ *
+ * Campaign detail pages are loaded by the public campaign_id (e.g.
+ * "CAMP-2026-785-529959"), not the Mongo ObjectId. The prayer service/queries
+ * below all treat campaignId as an ObjectId, so a public id used to cause a
+ * CastError -> HTTP 400. Resolving here once fixes every prayer sub-resource
+ * route (metrics, list, submit, moderation, analytics).
+ */
+router.param('campaignId', async (req, res, next, value) => {
+  try {
+    const campaign = await Campaign.findByIdOrCampaignId(value)
+      .select('_id')
+      .lean();
+
+    if (!campaign) {
+      return res.status(404).json({
+        success: false,
+        error: 'Campaign not found',
+      });
+    }
+
+    req.params.campaignId = campaign._id.toString();
+    next();
+  } catch (error) {
+    winstonLogger.error(`Prayer route campaign resolution error: ${error.message}`);
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid campaign identifier',
+    });
+  }
+});
+
+/**
  * @route GET /campaigns/:campaignId/prayer-request
  * @desc Get campaign prayer request settings (public)
  * @access Public

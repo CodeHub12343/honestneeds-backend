@@ -20,6 +20,19 @@ const { generateShortenedId } = require('../utils/idGenerator');
  */
 const generateUpdateId = () => `upd_${generateShortenedId()}`;
 
+/**
+ * Resolve a campaign identifier (Mongo _id or public campaign_id like
+ * "CAMP-2026-785-529959") to its canonical Mongo _id. Returns null if no
+ * matching campaign exists. Used to scope per-update queries so they work
+ * regardless of which id form the client sends.
+ */
+const resolveCampaignObjectId = async (identifier) => {
+  const campaign = await Campaign.findByIdOrCampaignId(identifier)
+    .select('_id')
+    .lean();
+  return campaign ? campaign._id : null;
+};
+
 const CampaignUpdateController = {
   /**
    * Create campaign update
@@ -38,8 +51,8 @@ const CampaignUpdateController = {
         });
       }
 
-      // Verify campaign exists and user is owner
-      const campaign = await Campaign.findById(finalCampaignId);
+      // Verify campaign exists and user is owner (accepts _id or public campaign_id)
+      const campaign = await Campaign.findByIdOrCampaignId(finalCampaignId);
       if (!campaign) {
         return res.status(404).json({
           success: false,
@@ -54,11 +67,11 @@ const CampaignUpdateController = {
         });
       }
 
-      // Create update
+      // Create update (store the canonical Mongo _id so listing matches)
       const updateId = generateUpdateId();
       const newUpdate = new CampaignUpdate({
         update_id: updateId,
-        campaign_id: finalCampaignId,
+        campaign_id: campaign._id,
         creator_id: userId,
         title: req.body.title,
         content: req.body.content,
@@ -129,10 +142,12 @@ const CampaignUpdateController = {
         });
       }
 
-      // Verify campaign exists - using either campaignId or id
+      // Verify campaign exists - accepts either a Mongo _id or the public
+      // campaign_id (e.g. "CAMP-2026-785-529959"). findByIdOrCampaignId guards
+      // against the CastError that findById throws on a non-ObjectId string.
       let campaign;
       try {
-        campaign = await Campaign.findById(finalCampaignId);
+        campaign = await Campaign.findByIdOrCampaignId(finalCampaignId);
       } catch (dbError) {
         winstonLogger.warn('⚠️ listUpdates: Database query error', {
           campaignId: finalCampaignId,
@@ -160,9 +175,10 @@ const CampaignUpdateController = {
         campaignTitle: campaign.title,
       });
 
-      // Build filter
+      // Build filter (use the resolved Mongo _id, not the raw param which may
+      // be a public campaign_id)
       const filter = {
-        campaign_id: finalCampaignId,
+        campaign_id: campaign._id,
         is_deleted: false,
       };
 
@@ -245,11 +261,15 @@ const CampaignUpdateController = {
       const { campaignId, updateId } = req.params;
       const userId = req.user?.id;
 
-      const update = await CampaignUpdate.findOne({
-        _id: updateId,
-        campaign_id: campaignId,
-        is_deleted: false,
-      });
+      const campaignObjectId = await resolveCampaignObjectId(campaignId);
+
+      const update = campaignObjectId
+        ? await CampaignUpdate.findOne({
+            _id: updateId,
+            campaign_id: campaignObjectId,
+            is_deleted: false,
+          })
+        : null;
 
       if (!update) {
         return res.status(404).json({
@@ -298,11 +318,15 @@ const CampaignUpdateController = {
         });
       }
 
-      const update = await CampaignUpdate.findOne({
-        _id: updateId,
-        campaign_id: campaignId,
-        is_deleted: false,
-      });
+      const campaignObjectId = await resolveCampaignObjectId(campaignId);
+
+      const update = campaignObjectId
+        ? await CampaignUpdate.findOne({
+            _id: updateId,
+            campaign_id: campaignObjectId,
+            is_deleted: false,
+          })
+        : null;
 
       if (!update) {
         return res.status(404).json({
@@ -371,11 +395,15 @@ const CampaignUpdateController = {
         });
       }
 
-      const update = await CampaignUpdate.findOne({
-        _id: updateId,
-        campaign_id: campaignId,
-        is_deleted: false,
-      });
+      const campaignObjectId = await resolveCampaignObjectId(campaignId);
+
+      const update = campaignObjectId
+        ? await CampaignUpdate.findOne({
+            _id: updateId,
+            campaign_id: campaignObjectId,
+            is_deleted: false,
+          })
+        : null;
 
       if (!update) {
         return res.status(404).json({
@@ -425,11 +453,15 @@ const CampaignUpdateController = {
       const { campaignId, updateId } = req.params;
       const { action } = req.body;
 
-      const update = await CampaignUpdate.findOne({
-        _id: updateId,
-        campaign_id: campaignId,
-        is_deleted: false,
-      });
+      const campaignObjectId = await resolveCampaignObjectId(campaignId);
+
+      const update = campaignObjectId
+        ? await CampaignUpdate.findOne({
+            _id: updateId,
+            campaign_id: campaignObjectId,
+            is_deleted: false,
+          })
+        : null;
 
       if (!update) {
         return res.status(404).json({
