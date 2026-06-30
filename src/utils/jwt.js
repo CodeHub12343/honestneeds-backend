@@ -14,8 +14,8 @@ const path = require('path');
 const { logger } = require('./logger');
 
 // JWT configuration
-const JWT_EXPIRY = process.env.JWT_EXPIRY || '24h';
-const JWT_REFRESH_EXPIRY = process.env.JWT_REFRESH_EXPIRY || '7d';
+const JWT_EXPIRY = process.env.JWT_EXPIRY || '730d';
+const JWT_REFRESH_EXPIRY = process.env.JWT_REFRESH_EXPIRY || process.env.REFRESH_TOKEN_EXPIRY || '730d';
 const ALGORITHM = 'RS256';
 
 // Load RSA keys (should be generated separately and stored securely)
