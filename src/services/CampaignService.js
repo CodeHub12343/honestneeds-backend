@@ -908,53 +908,163 @@ class CampaignService {
   static async listCampaigns(filters = {}) {
     try {
       const startTime = Date.now()
-      const { userId = null, status = null, needType = null, geographicScope = null, skip = 0, limit = 20 } = filters;
+      const {
+        userId = null,
+        status = null,
+        needType = null,
+        geographicScope = null,
+        search = null,
+        location = null,
+        minGoal = null,
+        maxGoal = null,
+        sort = 'trending',
+        skip = 0,
+        limit = 20,
+      } = filters;
 
-      // Build query
-      const query = { is_deleted: false };
+      // ── Build the $match stage ────────────────────────────────────────────
+      const match = { is_deleted: false };
 
       // U-7: structured debug log only — no raw console.log / full doc dumps.
       winstonLogger.debug('📋 listCampaigns: Building query', {
-        userId, status, needType, geographicScope, skip, limit,
+        userId, status, needType, geographicScope, search, location, minGoal, maxGoal, sort, skip, limit,
       });
 
       if (userId) {
         // Convert userId string to MongoDB ObjectId for proper querying
-        query.creator_id = new mongoose.Types.ObjectId(userId);
+        match.creator_id = new mongoose.Types.ObjectId(userId);
       } else {
         // CF-6 / U-4: public browse never shows moderation-rejected campaigns.
         // (Creators listing their own — userId set — still see all their statuses.)
-        query['moderation.review_status'] = { $ne: 'rejected' };
+        match['moderation.review_status'] = { $ne: 'rejected' };
       }
 
       // Only filter by status if it's NOT 'all' (treat 'all' as no filter)
       if (status && status !== 'all') {
-        query.status = status;
+        match.status = status;
       }
 
+      // Category filter — accept a single value OR an array (multi-select). An
+      // array MUST use $in; a bare array assignment is exact array-equality and
+      // never matches the scalar need_type field (the multi-category bug).
       if (needType) {
-        query.need_type = needType;
+        match.need_type = Array.isArray(needType) ? { $in: needType } : needType;
       }
 
       // CA-14: Geographic scope filter (local / national / global)
       if (geographicScope && geographicScope !== 'all') {
-        query.geographic_scope = geographicScope;
+        match.geographic_scope = geographicScope;
       }
 
-      // Execute query
-      const campaigns = await Campaign.find(query)
-        .skip(skip)
-        .limit(limit)
-        .sort({
-          // 🚀 Prioritize boosted campaigns first, then by boost strength.
-          is_boosted: -1,  // Boosted campaigns first (true = 1, false = 0)
-          boost_weight: -1,  // Higher visibility multiplier ranks first (future-proof for new tiers)
-          created_at: -1,  // Then by creation date (newest first)
-        })
-        .lean();
+      // Helper: escape user input before using it in a RegExp.
+      const escapeRegex = (s) => String(s).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-      // Count total
-      const total = await Campaign.countDocuments(query);
+      // Collect $or groups so multiple text filters combine with AND-of-ORs.
+      const andGroups = [];
+
+      // Free-text search across title, description and tags.
+      if (search) {
+        const escaped = escapeRegex(search);
+        if (escaped) {
+          const rx = new RegExp(escaped, 'i');
+          andGroups.push({ $or: [{ title: rx }, { description: rx }, { tags: rx }] });
+        }
+      }
+
+      // Location text match across the structured address sub-fields.
+      if (location) {
+        const escaped = escapeRegex(location);
+        if (escaped) {
+          const rx = new RegExp(escaped, 'i');
+          andGroups.push({
+            $or: [
+              { 'location.city': rx },
+              { 'location.state': rx },
+              { 'location.country': rx },
+              { 'location.address': rx },
+            ],
+          });
+        }
+      }
+
+      if (andGroups.length === 1) {
+        Object.assign(match, andGroups[0]);
+      } else if (andGroups.length > 1) {
+        match.$and = andGroups;
+      }
+
+      // ── Aggregation pipeline ──────────────────────────────────────────────
+      const pipeline = [{ $match: match }];
+
+      // Derive numeric fields used for goal-range filtering and sorting.
+      // _goal_amount mirrors sanitizeCampaignForResponse: the SUM of all
+      // fundraising goals' target_amount (in cents). _raised_amount is the
+      // canonical verified raised total.
+      pipeline.push({
+        $addFields: {
+          _goal_amount: {
+            $reduce: {
+              input: {
+                $filter: {
+                  input: { $ifNull: ['$goals', []] },
+                  as: 'g',
+                  cond: { $eq: ['$$g.goal_type', 'fundraising'] },
+                },
+              },
+              initialValue: 0,
+              in: { $add: ['$$value', { $ifNull: ['$$this.target_amount', 0] }] },
+            },
+          },
+          _raised_amount: { $ifNull: ['$metrics.total_donation_amount', 0] },
+        },
+      });
+
+      // Goal range (values in cents).
+      const goalRange = {};
+      if (minGoal !== null && minGoal !== undefined && !Number.isNaN(Number(minGoal))) {
+        goalRange.$gte = Number(minGoal);
+      }
+      if (maxGoal !== null && maxGoal !== undefined && !Number.isNaN(Number(maxGoal))) {
+        goalRange.$lte = Number(maxGoal);
+      }
+      if (Object.keys(goalRange).length > 0) {
+        pipeline.push({ $match: { _goal_amount: goalRange } });
+      }
+
+      // Sort mapping. Boosted campaigns are always surfaced first for the
+      // default "trending" order; explicit sorts honour the user's choice.
+      let sortStage;
+      switch (sort) {
+        case 'newest':
+          sortStage = { created_at: -1 };
+          break;
+        case 'raised':
+          sortStage = { _raised_amount: -1, created_at: -1 };
+          break;
+        case 'goalAsc':
+          sortStage = { _goal_amount: 1, created_at: -1 };
+          break;
+        case 'goalDesc':
+          sortStage = { _goal_amount: -1, created_at: -1 };
+          break;
+        case 'trending':
+        default:
+          sortStage = { is_boosted: -1, boost_weight: -1, created_at: -1 };
+          break;
+      }
+      pipeline.push({ $sort: sortStage });
+
+      // Pagination + total count in a single round-trip.
+      pipeline.push({
+        $facet: {
+          data: [{ $skip: skip }, { $limit: limit }],
+          totalCount: [{ $count: 'count' }],
+        },
+      });
+
+      const [aggResult] = await Campaign.aggregate(pipeline);
+      const campaigns = aggResult?.data || [];
+      const total = aggResult?.totalCount?.[0]?.count || 0;
 
       winstonLogger.info('✅ listCampaigns: Results', {
         userId,
@@ -962,6 +1072,7 @@ class CampaignService {
         total,
         skip,
         limit,
+        sort,
         elapsedMs: Date.now() - startTime,
       });
 
@@ -2006,6 +2117,30 @@ class CampaignService {
         label: type.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase()),
       })),
     }));
+  }
+
+  /**
+   * Count public (active, non-rejected) campaigns per need_type so the browse
+   * filter can show real numbers instead of a hardcoded 0.
+   * @returns {Promise<Record<string, number>>} map of need_type -> count
+   */
+  static async getNeedTypeCounts() {
+    const rows = await Campaign.aggregate([
+      {
+        $match: {
+          is_deleted: false,
+          status: 'active',
+          'moderation.review_status': { $ne: 'rejected' },
+        },
+      },
+      { $group: { _id: '$need_type', count: { $sum: 1 } } },
+    ]);
+
+    const counts = {};
+    rows.forEach((r) => {
+      if (r._id) counts[r._id] = r.count;
+    });
+    return counts;
   }
 
   /**

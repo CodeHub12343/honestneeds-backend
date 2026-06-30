@@ -259,6 +259,23 @@ const CampaignController = {
       // CA-14: Geographic scope filter (local | national | global | all)
       const geographicScope = req.query.geographicScope || req.query.scope || null;
 
+      // Free-text location match (city / state / country / address). The frontend
+      // also sends a `radius`, but campaigns have no reliable geocoordinates yet,
+      // so radius is accepted and ignored — location is matched textually.
+      const location = req.query.location || null;
+
+      // Goal range filter (values arrive in CENTS, matching the stored goal sums).
+      const minGoalRaw = req.query.minGoal;
+      const maxGoalRaw = req.query.maxGoal;
+      const minGoal =
+        minGoalRaw !== undefined && minGoalRaw !== '' && !Number.isNaN(Number(minGoalRaw))
+          ? Number(minGoalRaw)
+          : null;
+      const maxGoal =
+        maxGoalRaw !== undefined && maxGoalRaw !== '' && !Number.isNaN(Number(maxGoalRaw))
+          ? Number(maxGoalRaw)
+          : null;
+
       // Calculate skip for database query
       const skip = (page - 1) * limit;
 
@@ -269,6 +286,9 @@ const CampaignController = {
         needType,
         geographicScope,
         search,
+        location,
+        minGoal,
+        maxGoal,
         sort,
         skip,
         limit,
@@ -1341,14 +1361,34 @@ const CampaignController = {
    * 
    * Returns: 200 with array of need type categories
    */
-  getNeedTypes(req, res) {
+  async getNeedTypes(req, res) {
     try {
       const needTypes = CampaignService.getNeedTypes();
+
+      // Merge in live per-category counts (active campaigns) so the browse
+      // filter shows real numbers instead of 0. Counts failing must not break
+      // the (static) need-type list, so degrade gracefully to 0.
+      let counts = {};
+      try {
+        counts = await CampaignService.getNeedTypeCounts();
+      } catch (countErr) {
+        winstonLogger.warn('Need type counts unavailable, defaulting to 0', {
+          error: countErr.message,
+        });
+      }
+
+      const data = needTypes.map((group) => ({
+        category: group.category,
+        types: group.types.map((t) => ({
+          ...t,
+          count: counts[t.value] || 0,
+        })),
+      }));
 
       res.status(200).json({
         success: true,
         message: 'Campaign need types retrieved successfully',
-        data: needTypes,
+        data,
       });
     } catch (error) {
       winstonLogger.error('Need types handler error', {
