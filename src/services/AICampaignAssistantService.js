@@ -177,8 +177,9 @@ steps in "suggestions" (3-6 items).`,
         schema,
         system: `You are HonestNeed's Campaign Writer. ${PLATFORM_CONTEXT}
 Write in the creator's authentic first-person voice. Be honest and specific; do not fabricate
-names, diagnoses, dollar amounts, or events the creator did not provide. The "description" must
-fit within 2000 characters. Provide 3-5 title options under 120 characters each.`,
+names, diagnoses, dollar amounts, or events the creator did not provide. Aim for a focused,
+compelling "description" of about 300-600 words (roughly 2000-3500 characters); never exceed
+30000 characters. Provide 3-5 title options under 120 characters each.`,
         prompt: `Need type: ${needType || 'other'}
 Desired tone: ${tone}
 ${goalAmount ? `Fundraising goal: $${goalAmount}` : ''}
@@ -186,15 +187,15 @@ Creator's brief:
 ${brief}`,
       });
       // Enforce hard schema limits the model is only softly aware of.
-      if (data.description && data.description.length > 2000) {
-        data.description = data.description.slice(0, 1997) + '...';
+      if (data.description && data.description.length > 30000) {
+        data.description = data.description.slice(0, 29997) + '...';
       }
       return data;
     } catch (error) {
       if (error instanceof AIUnavailableError) {
         return {
           title_options: [brief.split('\n')[0].slice(0, 100) || 'Help Needed'],
-          description: brief.slice(0, 2000),
+          description: brief.slice(0, 30000),
           short_summary: brief.slice(0, 160),
           suggested_ask: goalAmount ? `We are raising $${goalAmount} to cover this need.` : 'Please consider supporting this need.',
           suggested_tags: [needType || 'other'],
@@ -254,12 +255,12 @@ ${brief}`,
         system: `You are HonestNeed's Campaign Optimizer. ${PLATFORM_CONTEXT}
 Audit the campaign against best practices: clarity of ask, emotional authenticity, budget
 transparency, media (photo/video), title strength, and shareability. "overall_score" is 0-100.
-Order "improvements" by priority. The "suggested_description" must stay within 2000 characters
-and must not invent facts.`,
+Order "improvements" by priority. Keep "suggested_description" focused at about 300-600 words
+(roughly 2000-3500 characters); never exceed 30000 characters, and do not invent facts.`,
         prompt: `Campaign (JSON):\n${JSON.stringify(context)}`,
       });
-      if (data.suggested_description && data.suggested_description.length > 2000) {
-        data.suggested_description = data.suggested_description.slice(0, 1997) + '...';
+      if (data.suggested_description && data.suggested_description.length > 30000) {
+        data.suggested_description = data.suggested_description.slice(0, 29997) + '...';
       }
       return data;
     } catch (error) {

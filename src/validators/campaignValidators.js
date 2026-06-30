@@ -175,7 +175,7 @@ const campaignCreationSchema = z.object({
   description: z
     .string()
     .min(10, 'Description must be at least 10 characters')
-    .max(2000, 'Description must be at most 2000 characters')
+    .max(30000, 'Description must be at most 30000 characters')
     .trim(),
 
   need_type: z.enum(needTypeEnum, {
@@ -267,7 +267,7 @@ const campaignUpdateSchema = z.object({
   description: z
     .string()
     .min(10, 'Description must be at least 10 characters')
-    .max(2000, 'Description must be at most 2000 characters')
+    .max(30000, 'Description must be at most 30000 characters')
     .trim()
     .optional(),
 

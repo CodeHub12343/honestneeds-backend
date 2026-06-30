@@ -52,7 +52,10 @@ const aiConfig = {
   maxTokens: {
     short: 1024, // classification, scores
     medium: 4096, // advice, optimization
-    long: 8192, // full campaign drafts
+    // Full campaign drafts. A ~300-600 word description plus the other JSON
+    // fields lands well under 4096 tokens; this is a hard output ceiling (cost
+    // backstop), not a target. Raise AI_MAX_TOKENS_LONG only if drafts truncate.
+    long: parseInt(process.env.AI_MAX_TOKENS_LONG, 10) || 4096,
   },
 
   // Per-IP / per-user soft rate limit for generative endpoints (requests per
