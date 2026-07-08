@@ -39,6 +39,18 @@ const errorHandler = (err, req, res, _next) => {
       message: e.message
     }));
   }
+  // Custom validation errors thrown by services (e.g. userService.register)
+  // carry a `details` map of { field: message }; surface it so the client can
+  // show which field failed instead of a generic error.
+  else if (err.code === 'VALIDATION_ERROR' && err.details) {
+    statusCode = 422;
+    errorCode = 'VALIDATION_ERROR';
+    const detailEntries = Object.entries(err.details);
+    if (detailEntries.length > 0) {
+      errorMessage = detailEntries[0][1];
+      errorDetails = detailEntries.map(([field, message]) => ({ field, message }));
+    }
+  }
   // Joi Validation Errors
   else if (err.isJoi || err.name === 'ValidationError') {
     statusCode = 422;

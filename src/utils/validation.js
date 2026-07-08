@@ -113,8 +113,14 @@ const validateDisplayName = (displayName) => {
     errors.push('Display name must not exceed 100 characters');
   }
 
-  if (!/^[a-zA-Z0-9 \-_.]+$/.test(trimmedName)) {
-    errors.push('Display name can only contain letters, numbers, spaces, hyphens, underscores, and dots');
+  // Allow Unicode letters/marks/numbers (accents, non-Latin scripts), emoji
+  // (Extended_Pictographic plus the ZWJ ‍, variation-selector ️ and
+  // keycap ⃣ joiners used in emoji sequences), plus the punctuation that
+  // appears in real names (apostrophes, hyphens, dots, commas, ampersands,
+  // parentheses, underscores). Angle brackets and other HTML-unsafe characters
+  // remain disallowed. `u` flag required for \p{...} classes.
+  if (!/^[\p{L}\p{M}\p{N}\p{Extended_Pictographic}\u200D\uFE0F\u20E3 '._,&()\-]+$/u.test(trimmedName)) {
+    errors.push('Display name contains unsupported characters');
   }
 
   return {
