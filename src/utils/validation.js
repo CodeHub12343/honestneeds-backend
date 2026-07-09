@@ -113,13 +113,17 @@ const validateDisplayName = (displayName) => {
     errors.push('Display name must not exceed 100 characters');
   }
 
-  // Allow Unicode letters/marks/numbers (accents, non-Latin scripts), emoji
-  // (Extended_Pictographic plus the ZWJ ‍, variation-selector ️ and
-  // keycap ⃣ joiners used in emoji sequences), plus the punctuation that
-  // appears in real names (apostrophes, hyphens, dots, commas, ampersands,
-  // parentheses, underscores). Angle brackets and other HTML-unsafe characters
-  // remain disallowed. `u` flag required for \p{...} classes.
-  if (!/^[\p{L}\p{M}\p{N}\p{Extended_Pictographic}\u200D\uFE0F\u20E3 '._,&()\-]+$/u.test(trimmedName)) {
+  // Denylist rather than allowlist: real names and organisation display
+  // names use an open-ended set of scripts, punctuation and emoji, so we
+  // accept everything EXCEPT characters that are genuinely unsafe/abusable:
+  //   - C0/C1 control characters
+  //   - HTML angle brackets (defense-in-depth against markup injection)
+  //   - bidi controls & zero-width chars used for impersonation spoofing
+  // ZWJ (\u200D) and variation selector (\uFE0F) are intentionally NOT
+  // blocked because they join multi-codepoint emoji sequences.
+  const DISALLOWED_NAME_CHARS =
+    /[\u0000-\u001F\u007F-\u009F<>\u200B\u200C\u200E\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/u;
+  if (DISALLOWED_NAME_CHARS.test(trimmedName)) {
     errors.push('Display name contains unsupported characters');
   }
 
