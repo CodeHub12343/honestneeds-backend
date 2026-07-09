@@ -140,9 +140,28 @@ const refreshAccessToken = async (req, res, next) => {
       throw error;
     }
 
-    // Verify refresh token
+    // Verify refresh token. A malformed / expired / wrong-secret token is a
+    // client problem (401), not a server fault. verifyToken throws bare
+    // JsonWebTokenError / TokenExpiredError without a statusCode, which the
+    // global handler otherwise reports as a 500 UNKNOWN — noise in the logs and
+    // a misleading status for the client's silent-refresh flow.
     const { verifyToken } = require('../utils/jwt');
-    const decoded = verifyToken(refreshToken);
+    let decoded;
+    try {
+      decoded = verifyToken(refreshToken);
+    } catch (verifyError) {
+      const error = new Error(
+        verifyError.name === 'TokenExpiredError'
+          ? 'Refresh token has expired'
+          : 'Invalid refresh token'
+      );
+      error.statusCode = 401;
+      error.code =
+        verifyError.name === 'TokenExpiredError'
+          ? 'REFRESH_TOKEN_EXPIRED'
+          : 'INVALID_REFRESH_TOKEN';
+      throw error;
+    }
 
     if (decoded.type !== 'refresh') {
       const error = new Error('Invalid token type');

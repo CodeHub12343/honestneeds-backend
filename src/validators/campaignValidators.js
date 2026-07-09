@@ -12,13 +12,44 @@ const emptyToUndefined = z
   .nullable()
   .optional();
 
+// Canonical payment method types accepted by the model + downstream services.
+const PAYMENT_METHOD_TYPES = [
+  'bank_transfer',
+  'paypal',
+  'stripe',
+  'check',
+  'money_order',
+  'venmo',
+  'cashapp',
+  'crypto',
+  'other',
+];
+
+// Legacy / frontend-facing aliases → canonical type. The campaign wizard sends
+// `bank` for a bank transfer, which historically caused a 422/400 blocker on
+// campaign creation. Normalize before enum validation so already-deployed
+// clients keep working without a frontend redeploy.
+const PAYMENT_METHOD_TYPE_ALIASES = {
+  bank: 'bank_transfer',
+  bank_account: 'bank_transfer',
+  mobile_money: 'other',
+};
+
+const normalizePaymentType = (val) =>
+  typeof val === 'string' && PAYMENT_METHOD_TYPE_ALIASES[val.trim().toLowerCase()]
+    ? PAYMENT_METHOD_TYPE_ALIASES[val.trim().toLowerCase()]
+    : val;
+
 // Payment method schema with validation
 const paymentMethodSchema = z.object({
-  type: z.enum(['bank_transfer', 'paypal', 'stripe', 'check', 'money_order', 'venmo', 'cashapp', 'crypto'], {
-    errorMap: (issue) => ({
-      message: `Invalid payment method type. Must be one of: bank_transfer, paypal, stripe, check, money_order, venmo, cashapp, crypto`,
-    }),
-  }),
+  type: z.preprocess(
+    normalizePaymentType,
+    z.enum(PAYMENT_METHOD_TYPES, {
+      errorMap: () => ({
+        message: `Invalid payment method type. Must be one of: ${PAYMENT_METHOD_TYPES.join(', ')}`,
+      }),
+    })
+  ),
   // Banking fields
   account_number: emptyToUndefined.pipe(z.string().min(5).max(50)).optional(),
   routing_number: emptyToUndefined.pipe(z.string().max(100)).optional(),

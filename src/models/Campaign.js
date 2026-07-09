@@ -194,7 +194,7 @@ const campaignSchema = new mongoose.Schema(
       {
         type: {
           type: String,
-          enum: ['bank_transfer', 'paypal', 'stripe', 'check', 'money_order', 'venmo', 'cashapp', 'crypto'],
+          enum: ['bank_transfer', 'paypal', 'stripe', 'check', 'money_order', 'venmo', 'cashapp', 'crypto', 'other'],
           required: true,
         },
         // Plain text payment details - stored exactly as creator enters them
