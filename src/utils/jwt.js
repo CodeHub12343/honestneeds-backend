@@ -33,10 +33,13 @@ let publicKey;
  */
 const initializeKeys = () => {
   try {
-    // Try to load keys from environment variables first (production)
+    // Try to load keys from environment variables first (production).
+    // Some hosts (and .env files) store multiline PEMs with literal "\n"
+    // sequences instead of real newlines — normalize so either form works.
     if (process.env.JWT_PRIVATE_KEY && process.env.JWT_PUBLIC_KEY) {
-      privateKey = process.env.JWT_PRIVATE_KEY;
-      publicKey = process.env.JWT_PUBLIC_KEY;
+      const normalizePem = (val) => val.replace(/\\n/g, '\n').trim() + '\n';
+      privateKey = normalizePem(process.env.JWT_PRIVATE_KEY);
+      publicKey = normalizePem(process.env.JWT_PUBLIC_KEY);
       logger.info('JWT keys loaded from environment variables');
       return;
     }
@@ -51,7 +54,18 @@ const initializeKeys = () => {
 
     // Generate keys if they don't exist
     if (!fs.existsSync(privateKeyPath) || !fs.existsSync(publicKeyPath)) {
-      logger.warn('RSA keys not found. Generating new keys...');
+      // CRITICAL: never auto-generate keys in production. Render's disk is
+      // ephemeral and private.pem is gitignored, so generating here mints a
+      // fresh keypair on every deploy/restart and invalidates every existing
+      // session ("Invalid token signature"). Fail loudly instead and require
+      // JWT_PRIVATE_KEY / JWT_PUBLIC_KEY env vars to be set.
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error(
+          'JWT keys are missing in production. Set JWT_PRIVATE_KEY and JWT_PUBLIC_KEY ' +
+            'environment variables (auto-generating keys would invalidate all existing sessions).'
+        );
+      }
+      logger.warn('RSA keys not found. Generating new keys (non-production only)...');
       const crypto = require('crypto');
       
       // Generate RSA keypair synchronously
