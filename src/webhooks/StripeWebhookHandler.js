@@ -124,6 +124,9 @@ class StripeWebhookHandler {
           sessionId: session.id,
           boostId: existingBoost._id,
         });
+        // Still ensure the campaign went live: if the first delivery created the
+        // boost but the publish step failed, a Stripe retry must finish the job.
+        await this.publishCampaignAfterPaidBoost(campaign_id, creator_id, session.id);
         return;
       }
 
@@ -173,6 +176,13 @@ class StripeWebhookHandler {
         boostExpiresAt: endDate,
       });
 
+      // A paid boost is an explicit "make my campaign live" purchase — the
+      // wizard's pay button reads "Pay & publish campaign". Publish it here so
+      // the campaign goes active even if the buyer never returns from Stripe
+      // checkout (closed tab, dropped redirect). Without this, paid campaigns
+      // sat invisible in draft.
+      await this.publishCampaignAfterPaidBoost(campaign_id, creator_id, session.id);
+
       // Log success event
       await StripeBoostService.logBoostPurchaseEvent(
         boost._id,
@@ -185,6 +195,45 @@ class StripeWebhookHandler {
       winstonLogger.error('Error handling checkout.session.completed webhook', {
         error: error.message,
         sessionId: session.id,
+      });
+    }
+  }
+
+  /**
+   * Publish a campaign after its paid boost completes, if it's still a draft.
+   * Reuses CampaignService.publishCampaign so ownership checks, the moderation
+   * gate, start/end dates and the campaign:published event all apply. Never
+   * throws — boost processing must succeed even if publishing can't (e.g. the
+   * campaign is already active, or was rejected by moderation).
+   */
+  async publishCampaignAfterPaidBoost(campaignId, creatorId, sessionId) {
+    try {
+      const campaign = await Campaign.findById(campaignId).select('status');
+      if (!campaign) {
+        winstonLogger.warn('Boost publish skipped: campaign not found', {
+          campaignId,
+          sessionId,
+        });
+        return;
+      }
+
+      if (campaign.status !== 'draft') {
+        // Already live (or paused/completed) — nothing to do.
+        return;
+      }
+
+      const CampaignService = require('../services/CampaignService');
+      await CampaignService.publishCampaign(String(campaignId), String(creatorId));
+
+      winstonLogger.info('✅ Campaign auto-published after paid boost', {
+        campaignId,
+        sessionId,
+      });
+    } catch (error) {
+      winstonLogger.error('Failed to auto-publish campaign after paid boost', {
+        campaignId,
+        sessionId,
+        error: error.message,
       });
     }
   }
