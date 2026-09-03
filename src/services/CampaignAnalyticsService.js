@@ -8,6 +8,7 @@
 
 const mongoose = require('mongoose');
 const Campaign = require('../models/Campaign');
+const { findCampaignByAnyId } = require('../utils/resolveCampaign');
 const Transaction = require('../models/Transaction');
 const { ShareRecord } = require('../models/Share');
 const CampaignUpdate = require('../models/CampaignUpdate');
@@ -31,11 +32,16 @@ const CampaignAnalyticsService = {
 
       // Get campaign details
       console.log('🔍 [Service] Fetching campaign details...', { campaignId });
-      const campaign = await Campaign.findById(campaignId).lean();
+      const campaign = await findCampaignByAnyId(campaignId, { lean: true });
       if (!campaign) {
         console.error('❌ [Service] Campaign not found', { campaignId });
         throw new Error('Campaign not found');
       }
+      // The route may hand us either identifier. Downstream aggregations query
+      // Transaction / ShareRecord by `campaign_id`, which stores the ObjectId —
+      // leaving a human ref in place would silently return zeroes rather than
+      // failing loudly.
+      campaignId = campaign._id;
       console.log('✅ [Service] Campaign details fetched', {
         campaignId,
         campaignTitle: campaign.title,
@@ -266,10 +272,15 @@ const CampaignAnalyticsService = {
   async getDonationStats(campaignId) {
     try {
       // Get campaign data to use as primary source
-      const campaign = await Campaign.findById(campaignId).lean();
+      const campaign = await findCampaignByAnyId(campaignId, { lean: true });
       if (!campaign) {
         throw new Error('Campaign not found');
       }
+      // The route may hand us either identifier. Downstream aggregations query
+      // Transaction / ShareRecord by `campaign_id`, which stores the ObjectId —
+      // leaving a human ref in place would silently return zeroes rather than
+      // failing loudly.
+      campaignId = campaign._id;
 
       console.log('💰 [Analytics] getDonationStats using campaign data:', {
         campaignId,
@@ -390,10 +401,15 @@ const CampaignAnalyticsService = {
   async getShareStats(campaignId) {
     try {
       // Get campaign data to use as primary source
-      const campaign = await Campaign.findById(campaignId).lean();
+      const campaign = await findCampaignByAnyId(campaignId, { lean: true });
       if (!campaign) {
         throw new Error('Campaign not found');
       }
+      // The route may hand us either identifier. Downstream aggregations query
+      // Transaction / ShareRecord by `campaign_id`, which stores the ObjectId —
+      // leaving a human ref in place would silently return zeroes rather than
+      // failing loudly.
+      campaignId = campaign._id;
 
       console.log('📢 [Analytics] getShareStats using campaign data:', {
         campaignId,
@@ -515,7 +531,7 @@ const CampaignAnalyticsService = {
    * Get engagement metrics
    */
   async getEngagementMetrics(campaignId) {
-    const campaign = await Campaign.findById(campaignId).lean();
+    const campaign = await findCampaignByAnyId(campaignId, { lean: true });
     if (!campaign) {
       return {
         viewsPerDay: 0,

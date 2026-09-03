@@ -1,4 +1,5 @@
 const CampaignBoost = require('../models/CampaignBoost');
+const { resolveCampaignObjectId } = require('../utils/resolveCampaign');
 const Campaign = require('../models/Campaign');
 const User = require('../models/User');
 const StripeBoostService = require('../services/StripeBoostService');
@@ -191,8 +192,20 @@ class BoostController {
     try {
       const { campaign_id } = req.params;
 
+      // A campaign is reachable by Mongo _id OR human campaign_id (CAMP-…),
+      // and both appear in real URLs. CampaignBoost.campaign_id stores the
+      // ObjectId, so a raw human ref here threw a CastError → 500.
+      const campaignObjectId = await resolveCampaignObjectId(campaign_id);
+      if (!campaignObjectId) {
+        return res.status(200).json({
+          success: true,
+          data: null,
+          message: 'No active boost for this campaign',
+        });
+      }
+
       const boost = await CampaignBoost.findOne({
-        campaign_id,
+        campaign_id: campaignObjectId,
         is_active: true,
         end_date: { $gt: new Date() },
         payment_status: 'completed',

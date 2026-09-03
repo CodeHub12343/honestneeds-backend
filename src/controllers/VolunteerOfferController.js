@@ -1,5 +1,6 @@
 ﻿const { logger } = require('../utils/logger');
 const volunteerService = require('../services/VolunteerService');
+const { resolveCampaignObjectId } = require('../utils/resolveCampaign');
 const {
   validateCreateVolunteerOffer,
   validateGetCampaignVolunteers,
@@ -59,7 +60,19 @@ exports.getCampaignOffers = async (req, res) => {
       return res.status(400).json(validation);
     }
 
-    const result = await volunteerService.getCampaignOffers(validation.data.campaignId, validation.data);
+    // The route param may be a Mongo _id or the human campaign_id (CAMP-…).
+    // VolunteerOffer.campaign_id stores the ObjectId, so pass the resolved form
+    // rather than letting a human ref reach the query as a CastError.
+    const campaignObjectId = await resolveCampaignObjectId(validation.data.campaignId);
+    if (!campaignObjectId) {
+      return res.status(404).json({
+        success: false,
+        error: 'CAMPAIGN_NOT_FOUND',
+        message: 'Campaign not found',
+      });
+    }
+
+    const result = await volunteerService.getCampaignOffers(campaignObjectId, validation.data);
     const transformedData = result.data.map(offer => volunteerService.transformOfferForAPI(offer));
     
     return res.status(200).json({
