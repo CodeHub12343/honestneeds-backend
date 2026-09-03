@@ -3,9 +3,20 @@
  */
 
 const ConfigService = require('../../services/admin/ConfigService');
+const FeatureFlagService = require('../../services/FeatureFlagService');
 const { asyncHandler, ok, parsePagination } = require('./helpers');
 
 const ConfigController = {
+  /**
+   * Feature flags with their declared shape (label, description, type, modes,
+   * default) alongside the current value — so the admin UI can render real
+   * toggles instead of asking someone to hand-edit raw JSON.
+   */
+  getFeatureFlags: asyncHandler(async (req, res) => {
+    const data = await FeatureFlagService.describe();
+    return ok(res, { flags: data });
+  }),
+
   getAll: asyncHandler(async (req, res) => {
     const data = await ConfigService.getAll();
     return ok(res, data);

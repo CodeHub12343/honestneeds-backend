@@ -321,6 +321,54 @@ const publicApiLimiter = rateLimit({
 });
 
 /**
+ * Campaign Upgrade Rate Limiter
+ * Max 5 upgrade attempts per hour per user
+ *
+ * Upgrading a campaign to a Share Campaign is a deliberate, rare action. A
+ * legitimate user does it once. This limit exists mainly to blunt sponsored
+ * upgrade-request spam aimed at a single creator.
+ *
+ * Used for: POST /campaigns/:id/upgrade, POST /campaigns/:id/upgrade-requests
+ */
+const upgradeLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 5,
+  message: {
+    success: false,
+    error: 'RATE_LIMIT_EXCEEDED',
+    message: 'Too many upgrade attempts. Please try again later.',
+  },
+  statusCode: 429,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user?.userId || req.ip,
+});
+
+/**
+ * Community Boost Rate Limiter
+ * Max 30 boosts per hour per user
+ *
+ * The one-boost-per-campaign-per-day quota is enforced by a unique database
+ * index, not here — this limiter guards against a script sweeping MANY
+ * campaigns, which the per-campaign quota alone would not catch.
+ *
+ * Used for: POST /campaigns/:id/support-boost
+ */
+const boostLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 30,
+  message: {
+    success: false,
+    error: 'BOOST_RATE_LIMITED',
+    message: "You've boosted a lot of campaigns recently. Try again in a little while.",
+  },
+  statusCode: 429,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user?.userId || req.ip,
+});
+
+/**
  * Apply rate limiter and log attempt
  * Wrapper function for logging all rate limit attempts
  * 
@@ -355,5 +403,7 @@ module.exports = {
   paymentMethodLimiter,
   refundLimiter,
   publicApiLimiter,
+  upgradeLimiter,
+  boostLimiter,
   withRateLimitLogging,
 };

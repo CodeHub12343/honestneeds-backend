@@ -669,6 +669,103 @@ const REGISTRY = {
     actionUrl: () => '/rewards',
   },
 
+  // ── Free → Share Campaign upgrades ──────────────────────────────────────
+  campaign_upgraded: {
+    category: 'campaigns',
+    icon_emoji: '🚀',
+    color: 'success',
+    defaultChannels: ALL,
+    prefPath: 'campaign_notifications.upgrades',
+    title: () => 'Your campaign is now a Share Campaign',
+    message: (d) => {
+      if (d.initiator_type === 'admin') {
+        // An admin upgrade leaves paid sharing OFF and does not require the
+        // owner to have a payout method — so the notification has to name that
+        // next step explicitly, or the creator has no idea why nothing is
+        // paying out.
+        return d.payout_ready
+          ? `The HonestNeed team upgraded ${campaignName(d)} to a Share Campaign. Review the reward settings to start paid sharing.`
+          : `The HonestNeed team upgraded ${campaignName(d)} to a Share Campaign. Add a payout method, then set your reward amount to start rewarding people who share it.`;
+      }
+      if (d.initiator_type === 'sponsor') {
+        return `${actor(d)}'s upgrade request for ${campaignName(d)} is now live — supporters can earn rewards for sharing it.`;
+      }
+      return `${campaignName(d)} was upgraded to a Share Campaign. Supporters can now earn rewards for sharing it.`;
+    },
+    actionUrl: campaignUrl,
+  },
+  campaign_upgrade_requested: {
+    // Actionable: the owner must approve or decline, so this is never opt-out.
+    category: 'campaigns',
+    icon_emoji: '🤝',
+    color: 'primary',
+    defaultChannels: ALL,
+    prefPath: null,
+    title: () => 'Someone wants to boost your campaign',
+    message: (d) =>
+      `${actor(d)} would like to turn ${campaignName(d)} into a Share Campaign. Your approval is needed.`,
+    actionUrl: () => '/upgrade-requests',
+  },
+  campaign_upgrade_approved: {
+    category: 'campaigns',
+    icon_emoji: '✅',
+    color: 'success',
+    defaultChannels: IN_APP_PUSH,
+    prefPath: 'campaign_notifications.upgrades',
+    title: () => 'Your upgrade request was accepted',
+    message: (d) => `${campaignName(d)} is now a Share Campaign, thanks to you.`,
+    actionUrl: campaignUrl,
+  },
+  campaign_upgrade_rejected: {
+    category: 'campaigns',
+    icon_emoji: '↩️',
+    color: 'info',
+    defaultChannels: IN_APP_ONLY,
+    prefPath: 'campaign_notifications.upgrades',
+    title: () => 'Your upgrade request was declined',
+    message: (d) =>
+      d.reason
+        ? `The owner of ${campaignName(d)} declined the upgrade: ${d.reason}`
+        : `The owner of ${campaignName(d)} declined the upgrade request.`,
+    actionUrl: campaignUrl,
+  },
+  share_campaign_payout_method_invalid: {
+    // Transactional: sharers are accruing rewards this creator currently
+    // cannot pay. Always deliver.
+    category: 'payouts',
+    icon_emoji: '⚠️',
+    color: 'warning',
+    defaultChannels: ALL,
+    prefPath: null,
+    title: () => 'Action needed: payout method problem',
+    message: (d) =>
+      `Paid sharing on ${campaignName(d)} has been paused because your payout method is no longer usable. Update it to resume.`,
+    actionUrl: () => '/settings',
+  },
+
+  // ── Community (peer) boosts ─────────────────────────────────────────────
+  campaign_boosted: {
+    category: 'campaigns',
+    icon_emoji: '⚡',
+    color: 'success',
+    defaultChannels: IN_APP_PUSH,
+    prefPath: 'campaign_notifications.boosts',
+    title: () => 'Your campaign got a boost',
+    message: (d) => `${actor(d)} boosted ${campaignName(d)} to help more people see it.`,
+    actionUrl: campaignUrl,
+  },
+  campaign_boost_milestone: {
+    category: 'campaigns',
+    icon_emoji: '🔥',
+    color: 'success',
+    defaultChannels: IN_APP_PUSH,
+    prefPath: 'campaign_notifications.boosts',
+    title: (d) => `${d.boost_count || ''} people have boosted your campaign`,
+    message: (d) =>
+      `${campaignName(d)} has now been boosted ${d.boost_count || 'many'} times by the community.`,
+    actionUrl: campaignUrl,
+  },
+
   // ── Messaging ───────────────────────────────────────────────────────────
   new_message: {
     category: 'messages',

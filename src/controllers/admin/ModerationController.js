@@ -3,6 +3,7 @@
  */
 
 const ModerationService = require('../../services/admin/ModerationService');
+const CampaignEventAnalyticsService = require('../../services/CampaignEventAnalyticsService');
 const { asyncHandler, ok, parsePagination } = require('./helpers');
 
 const ModerationController = {
@@ -45,6 +46,70 @@ const ModerationController = {
 
   resumeCampaign: asyncHandler(async (req, res) => {
     const data = await ModerationService.setCampaignPaused(req.params.campaignId, false, {
+      adminId: req.adminUser._id,
+      reason: req.body?.reason,
+      req,
+    });
+    return ok(res, data);
+  }),
+
+  // ── AD-02 Free Campaign → Share Campaign upgrade ────────────────────
+  getCampaignUpgradeContext: asyncHandler(async (req, res) => {
+    const data = await ModerationService.getCampaignUpgradeContext(req.params.campaignId);
+    return ok(res, data);
+  }),
+
+  listCampaignUpgrades: asyncHandler(async (req, res) => {
+    const { page, limit } = parsePagination(req.query)
+    const data = await ModerationService.listCampaignUpgrades({
+      status: req.query.status && req.query.status !== 'all' ? req.query.status : undefined,
+      initiatorType:
+        req.query.initiator_type && req.query.initiator_type !== 'all'
+          ? req.query.initiator_type
+          : undefined,
+      page,
+      limit,
+    });
+    return ok(res, data);
+  }),
+
+  upgradeCampaign: asyncHandler(async (req, res) => {
+    const data = await ModerationService.upgradeCampaign(req.params.campaignId, {
+      adminId: req.adminUser._id,
+      shareConfig: {
+        budget: req.body?.budget,
+        reward_per_share: req.body?.reward_per_share,
+        platforms: req.body?.platforms,
+      },
+      adminNote: req.body?.admin_note,
+      idempotencyKey: req.body?.idempotency_key || req.get('Idempotency-Key') || null,
+      req,
+    });
+    return ok(res, data);
+  }),
+
+  // ── Upgrade funnel + boost analytics ────────────────────────────────
+  getCampaignUpgradeStats: asyncHandler(async (req, res) => {
+    const { start_date, end_date } = req.query;
+    const [funnel, boosts] = await Promise.all([
+      CampaignEventAnalyticsService.getUpgradeFunnel({ startDate: start_date, endDate: end_date }),
+      CampaignEventAnalyticsService.getBoostStats({ startDate: start_date, endDate: end_date }),
+    ]);
+    return ok(res, { funnel, boosts });
+  }),
+
+  // ── Community boost fraud remediation ───────────────────────────────
+  listCampaignSupportBoosts: asyncHandler(async (req, res) => {
+    const { page, limit } = parsePagination(req.query)
+    const data = await ModerationService.listCampaignSupportBoosts(req.params.campaignId, {
+      page,
+      limit,
+    });
+    return ok(res, data);
+  }),
+
+  revokeSupportBoost: asyncHandler(async (req, res) => {
+    const data = await ModerationService.revokeSupportBoost(req.params.boostId, {
       adminId: req.adminUser._id,
       reason: req.body?.reason,
       req,

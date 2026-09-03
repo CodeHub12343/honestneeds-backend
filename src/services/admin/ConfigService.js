@@ -12,6 +12,7 @@
 const PlatformSettings = require('../../models/PlatformSettings');
 const BroadcastNotification = require('../../models/BroadcastNotification');
 const AuditService = require('./AuditService');
+const FeatureFlagService = require('../FeatureFlagService');
 const {
   PLATFORM_FEE_RATE,
   WITHDRAWAL_FEE_RATE,
@@ -81,6 +82,12 @@ class ConfigService {
 
     const existing = await PlatformSettings.getByKey(key);
     const updated = await PlatformSettings.updateByKey(key, value, adminId);
+
+    // Feature flags are cached on hot paths; drop that cache so an admin's
+    // change takes effect immediately rather than up to a TTL later.
+    if (key === 'feature_flags') {
+      FeatureFlagService.invalidate();
+    }
 
     await AuditService.record({
       adminId,

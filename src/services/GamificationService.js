@@ -110,6 +110,9 @@ class GamificationService {
       case 'share':
         amount = XP_ACTIONS.share_campaign;
         break;
+      case 'boost_campaign':
+        amount = XP_ACTIONS.boost_campaign;
+        break;
       case 'pray':
         amount = XP_ACTIONS.pray;
         break;

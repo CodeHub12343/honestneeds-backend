@@ -33,6 +33,19 @@ const activityLogSchema = new mongoose.Schema(
         // Sharing activities
         'campaign_shared',
         'referral_click',
+        // Free → Share Campaign upgrades (funnel instrumentation)
+        'campaign_upgrade_attempted',
+        'campaign_upgrade_succeeded',
+        'campaign_upgrade_failed',
+        'campaign_upgrade_requested',
+        'campaign_upgrade_approved',
+        'campaign_upgrade_rejected',
+        // Community (peer) boosts
+        'campaign_boost_succeeded',
+        'campaign_boost_suppressed',
+        'campaign_boost_revoked',
+        // Payout gate in warn mode: who WOULD have been refused.
+        'share_campaign_gate_warned',
         // Admin activities
         'admin_action_taken',
         'settings_modified',
@@ -79,6 +92,13 @@ const activityLogSchema = new mongoose.Schema(
       changes: {
         before: mongoose.Schema.Types.Mixed,
         after: mongoose.Schema.Types.Mixed,
+      },
+      // Event-specific payload (reason codes, initiator type, amounts, trust
+      // weights…). `metadata` is otherwise a strict subdocument, so arbitrary
+      // analytics fields would be silently dropped without this.
+      context: {
+        type: mongoose.Schema.Types.Mixed,
+        default: undefined,
       },
     },
     severity: {

@@ -19,6 +19,9 @@ const campaignMilestoneRoutes = require('./campaignMilestoneRoutes');
 const uploadMiddleware = require('../middleware/uploadMiddleware');
 const { createUploadMiddleware } = require('../middleware/uploadMiddleware');
 const { authMiddleware } = require('../middleware/authMiddleware');
+const CampaignUpgradeController = require('../controllers/campaignUpgradeController');
+const CampaignSupportBoostController = require('../controllers/CampaignSupportBoostController');
+const { upgradeLimiter, boostLimiter } = require('../middleware/rateLimiter');
 
 // CF-2: dedicated uploader for donor proof-of-payment images (own Cloudinary folder, 5MB cap)
 const donationProofUpload = createUploadMiddleware({
@@ -73,6 +76,62 @@ const { validateCreateDonation, validateListDonationsQuery } = require('../valid
  *   formData.append('image', imageFile);
  *   fetch('/api/campaigns', { method: 'POST', body: formData })
  */
+// ============================================================================
+// CAMPAIGN UPGRADE (Free Campaign → Share Campaign) & COMMUNITY BOOST
+// ============================================================================
+// ⚠️ ROUTE ORDER MATTERS. These literal-prefix routes are registered BEFORE any
+// `/:id/...` pattern below, otherwise Express matches 'upgrade-requests' and
+// 'support-boosts' as an `:id` and these endpoints become unreachable.
+
+/**
+ * GET /campaigns/upgrade-requests/mine
+ * The owner's inbox of sponsored upgrade requests awaiting their decision.
+ */
+router.get(
+  '/upgrade-requests/mine',
+  authMiddleware,
+  CampaignUpgradeController.listMyUpgradeRequests
+);
+
+/**
+ * POST /campaigns/upgrade-requests/:upgradeId/approve
+ * OWNER ONLY. The owner supplies the two things nobody else can supply on their
+ * behalf: consent to pay sharers directly, and a usable payout method.
+ */
+router.post(
+  '/upgrade-requests/:upgradeId/approve',
+  authMiddleware,
+  CampaignUpgradeController.approveUpgradeRequest
+);
+
+/**
+ * POST /campaigns/upgrade-requests/:upgradeId/reject   (owner only)
+ */
+router.post(
+  '/upgrade-requests/:upgradeId/reject',
+  authMiddleware,
+  CampaignUpgradeController.rejectUpgradeRequest
+);
+
+/**
+ * POST /campaigns/upgrade-requests/:upgradeId/cancel   (requester only)
+ */
+router.post(
+  '/upgrade-requests/:upgradeId/cancel',
+  authMiddleware,
+  CampaignUpgradeController.cancelUpgradeRequest
+);
+
+/**
+ * GET /campaigns/support-boosts/mine
+ * The signed-in user's own community-boost history.
+ */
+router.get(
+  '/support-boosts/mine',
+  authMiddleware,
+  CampaignSupportBoostController.getMyBoostActivity
+);
+
 router.post('/', uploadMiddleware, authMiddleware, CampaignController.create);
 
 /**
@@ -1171,6 +1230,81 @@ router.use('/:id/comments', campaignCommentRoutes);
 // - POST   /campaigns/:id/milestones/check  (recompute auto-milestones)
 // - DELETE /campaigns/:id/milestones/:milestoneId
 // ============================================================================
+// ── Per-campaign upgrade & boost endpoints ──────────────────────────────────
+
+/**
+ * GET /campaigns/:id/upgrade-eligibility
+ * Whether this campaign can become a Share Campaign, and whether the OWNER has
+ * a usable payout method. Drives the UI only — never authoritative; the
+ * mutation endpoints re-check everything server-side.
+ */
+router.get(
+  '/:id/upgrade-eligibility',
+  authMiddleware,
+  CampaignUpgradeController.getEligibility
+);
+
+/**
+ * POST /campaigns/:id/upgrade
+ * Creator upgrades their OWN campaign.
+ * Body: { budget, reward_per_share, platforms[], payout_consent,
+ *         payment_method_id?, idempotency_key? }
+ */
+router.post(
+  '/:id/upgrade',
+  authMiddleware,
+  upgradeLimiter,
+  CampaignUpgradeController.upgradeOwnCampaign
+);
+
+/**
+ * POST /campaigns/:id/upgrade-requests
+ * A qualified supporter (donor or verified sharer) ASKS the owner to upgrade.
+ * Never mutates the campaign — the owner must approve.
+ */
+router.post(
+  '/:id/upgrade-requests',
+  authMiddleware,
+  upgradeLimiter,
+  CampaignUpgradeController.createUpgradeRequest
+);
+
+/**
+ * GET /campaigns/:id/upgrade-requests
+ */
+router.get(
+  '/:id/upgrade-requests',
+  authMiddleware,
+  CampaignUpgradeController.listCampaignUpgradeRequests
+);
+
+/**
+ * GET /campaigns/:id/support-boost/eligibility
+ */
+router.get(
+  '/:id/support-boost/eligibility',
+  authMiddleware,
+  CampaignSupportBoostController.getEligibility
+);
+
+/**
+ * POST /campaigns/:id/support-boost
+ * Free community boost of ANOTHER user's campaign. One ranking-effective boost
+ * per user per campaign per UTC day; over-quota boosts are recorded but do not
+ * affect ranking (mirrors the existing share quota rule).
+ */
+router.post(
+  '/:id/support-boost',
+  authMiddleware,
+  boostLimiter,
+  CampaignSupportBoostController.createBoost
+);
+
+/**
+ * GET /campaigns/:id/support-boost/stats   (public)
+ */
+router.get('/:id/support-boost/stats', CampaignSupportBoostController.getStats);
+
 router.use('/:id/milestones', campaignMilestoneRoutes);
 
 module.exports = router;

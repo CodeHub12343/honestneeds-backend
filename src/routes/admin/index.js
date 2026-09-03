@@ -77,6 +77,19 @@ router.post('/moderation/campaigns/:campaignId/decision', requirePermission(PERM
 router.post('/moderation/campaigns/:campaignId/pause', requirePermission(PERMISSIONS.CAMPAIGN_MODERATION_ACT), ModerationController.pauseCampaign);
 router.post('/moderation/campaigns/:campaignId/resume', requirePermission(PERMISSIONS.CAMPAIGN_MODERATION_ACT), ModerationController.resumeCampaign);
 
+// Free Campaign → Share Campaign upgrade. The context endpoint returns the
+// owner's payout readiness so the UI can disable the action with a reason;
+// the service re-checks it regardless — there is no admin override.
+router.get('/moderation/campaigns/:campaignId/upgrade-context', requirePermission(PERMISSIONS.CAMPAIGN_MODERATION_VIEW), ModerationController.getCampaignUpgradeContext);
+router.get('/moderation/campaign-upgrades/stats', requirePermission(PERMISSIONS.CAMPAIGN_MODERATION_VIEW), ModerationController.getCampaignUpgradeStats);
+router.get('/moderation/campaign-upgrades', requirePermission(PERMISSIONS.CAMPAIGN_MODERATION_VIEW), ModerationController.listCampaignUpgrades);
+
+// Community (peer) boost fraud remediation. Revoking strips a boost's ranking
+// contribution and recomputes the campaign score immediately.
+router.get('/moderation/campaigns/:campaignId/support-boosts', requirePermission(PERMISSIONS.CAMPAIGN_MODERATION_VIEW), ModerationController.listCampaignSupportBoosts);
+router.post('/moderation/support-boosts/:boostId/revoke', requirePermission(PERMISSIONS.CAMPAIGN_MODERATION_ACT), ModerationController.revokeSupportBoost);
+router.post('/moderation/campaigns/:campaignId/upgrade', requirePermission(PERMISSIONS.CAMPAIGN_MODERATION_ACT), ModerationController.upgradeCampaign);
+
 // ── AD-08 Content moderation (comments) ─────────────────────────────────
 router.get('/moderation/comments', requirePermission(PERMISSIONS.CONTENT_MODERATION_VIEW), ModerationController.getFlaggedComments);
 router.post('/moderation/comments/:commentId/action', requirePermission(PERMISSIONS.CONTENT_MODERATION_ACT), ModerationController.moderateComment);
@@ -124,6 +137,7 @@ router.post('/fraud/alerts/:alertId/action', requirePermission(PERMISSIONS.FRAUD
 router.post('/fraud/assessments/:assessmentId/review', requirePermission(PERMISSIONS.FRAUD_ACT), FraudController.reviewAssessment);
 
 // ── AD-07 Platform configuration ────────────────────────────────────────
+router.get('/config/feature-flags', requirePermission(PERMISSIONS.CONFIG_VIEW), ConfigController.getFeatureFlags);
 router.get('/config', requirePermission(PERMISSIONS.CONFIG_VIEW), ConfigController.getAll);
 router.get('/config/:key', requirePermission(PERMISSIONS.CONFIG_VIEW), ConfigController.getByKey);
 router.put('/config/:key', requirePermission(PERMISSIONS.CONFIG_MANAGE), ConfigController.updateByKey);

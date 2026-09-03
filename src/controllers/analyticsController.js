@@ -8,6 +8,7 @@ const advancedAnalyticsService = require('../services/AdvancedAnalyticsService')
 const BusinessProfile = require('../models/BusinessProfile');
 const analyticsCache = require('../utils/analyticsCache');
 const Campaign = require('../models/Campaign');
+const { findCampaignByAnyId } = require('../utils/resolveCampaign');
 const Transaction = require('../models/Transaction');
 const ShareTracking = require('../models/ShareTracking');
 const User = require('../models/User');
@@ -57,10 +58,10 @@ const AnalyticsController = {
       }
 
       // Find campaign
-      let campaign = await Campaign.findById(id);
-      if (!campaign) {
-        campaign = await Campaign.findOne({ campaign_id: id });
-      }
+      // Campaign.findById() THROWS a CastError on a non-ObjectId rather than
+      // returning null, so the campaign_id fallback that used to live here was
+      // unreachable — a human ref (CAMP-…) 500'd instead of falling through.
+      let campaign = await findCampaignByAnyId(id);
 
       if (!campaign) {
         return res.status(404).json({
@@ -208,10 +209,10 @@ const AnalyticsController = {
       }
 
       // Find campaign
-      let campaign = await Campaign.findById(id);
-      if (!campaign) {
-        campaign = await Campaign.findOne({ campaign_id: id });
-      }
+      // Campaign.findById() THROWS a CastError on a non-ObjectId rather than
+      // returning null, so the campaign_id fallback that used to live here was
+      // unreachable — a human ref (CAMP-…) 500'd instead of falling through.
+      let campaign = await findCampaignByAnyId(id);
 
       if (!campaign) {
         return res.status(404).json({
@@ -290,10 +291,10 @@ const AnalyticsController = {
       }
 
       // Find campaign
-      let campaign = await Campaign.findById(id);
-      if (!campaign) {
-        campaign = await Campaign.findOne({ campaign_id: id });
-      }
+      // Campaign.findById() THROWS a CastError on a non-ObjectId rather than
+      // returning null, so the campaign_id fallback that used to live here was
+      // unreachable — a human ref (CAMP-…) 500'd instead of falling through.
+      let campaign = await findCampaignByAnyId(id);
 
       if (!campaign) {
         return res.status(404).json({
@@ -368,10 +369,10 @@ const AnalyticsController = {
       }
 
       // Find campaign
-      let campaign = await Campaign.findById(id);
-      if (!campaign) {
-        campaign = await Campaign.findOne({ campaign_id: id });
-      }
+      // Campaign.findById() THROWS a CastError on a non-ObjectId rather than
+      // returning null, so the campaign_id fallback that used to live here was
+      // unreachable — a human ref (CAMP-…) 500'd instead of falling through.
+      let campaign = await findCampaignByAnyId(id);
 
       if (!campaign) {
         return res.status(404).json({
@@ -662,9 +663,10 @@ const AnalyticsController = {
       const userId = req.user?.id;
 
       // Verify campaign exists
-      const campaign = await Campaign.findById(id)
-        .select('title description image goal_amount status creator_id created_at metrics')
-        .lean();
+      const campaign = await findCampaignByAnyId(id, {
+        select: 'title description image goal_amount status creator_id created_at metrics',
+        lean: true,
+      });
 
       if (!campaign) {
         winstonLogger.warn('Flyer generation failed: campaign not found', {
@@ -701,7 +703,7 @@ const AnalyticsController = {
       // Get QR code for campaign (latest one)
       let qrCodeData = null;
       try {
-        const qrCodes = await QRCode.find({ campaign_id: id })
+        const qrCodes = await QRCode.find({ campaign_id: campaign._id })
           .sort({ created_at: -1 })
           .limit(1)
           .select('code label created_at')
@@ -822,9 +824,10 @@ const AnalyticsController = {
       const userId = req.user?.id;
 
       // Verify campaign exists
-      const campaign = await Campaign.findById(id)
-        .select('title creator_id metrics status created_at')
-        .lean();
+      const campaign = await findCampaignByAnyId(id, {
+        select: 'title creator_id metrics status created_at',
+        lean: true,
+      });
 
       if (!campaign) {
         winstonLogger.warn('Share analytics failed: campaign not found', {
@@ -884,7 +887,7 @@ const AnalyticsController = {
 
       // Get share tracking data for campaign with date filter
       const shareData = await ShareTracking.find({
-        campaign_id: id,
+        campaign_id: campaign._id,
         ...dateFilter,
       })
         .lean()
@@ -937,7 +940,7 @@ const AnalyticsController = {
 
       // Get top sharers for this campaign
       const topSharers = await ShareTracking.find({
-        campaign_id: id,
+        campaign_id: campaign._id,
         ...dateFilter,
       })
         .sort({ conversion_count: -1, earned_amount: -1 })
@@ -1021,7 +1024,7 @@ const AnalyticsController = {
       const userId = req.user.id;
 
       // Verify campaign and ownership
-      const campaign = await Campaign.findById(id);
+      const campaign = await findCampaignByAnyId(id);
       if (!campaign) {
         return res.status(404).json({
           success: false,
@@ -1040,7 +1043,7 @@ const AnalyticsController = {
       }
 
       // Get donation data
-      const donations = await Transaction.find({ campaign_id: id }).lean();
+      const donations = await Transaction.find({ campaign_id: campaign._id }).lean();
 
       // Calculate metrics
       const totalDonations = donations.length;
@@ -1059,7 +1062,7 @@ const AnalyticsController = {
       });
 
       // Get top donors (but mask email for privacy)
-      const topDonors = await Donation.find({ campaign_id: id })
+      const topDonors = await Donation.find({ campaign_id: campaign._id })
         .sort({ amount: -1 })
         .limit(10)
         .populate('donor_id', 'display_name -email')
@@ -1535,10 +1538,10 @@ const AnalyticsController = {
       }
 
       // Find campaign
-      let campaign = await Campaign.findById(id);
-      if (!campaign) {
-        campaign = await Campaign.findOne({ campaign_id: id });
-      }
+      // Campaign.findById() THROWS a CastError on a non-ObjectId rather than
+      // returning null, so the campaign_id fallback that used to live here was
+      // unreachable — a human ref (CAMP-…) 500'd instead of falling through.
+      let campaign = await findCampaignByAnyId(id);
 
       if (!campaign) {
         return res.status(404).json({
@@ -1638,10 +1641,10 @@ const AnalyticsController = {
       }
 
       // Find campaign
-      let campaign = await Campaign.findById(id);
-      if (!campaign) {
-        campaign = await Campaign.findOne({ campaign_id: id });
-      }
+      // Campaign.findById() THROWS a CastError on a non-ObjectId rather than
+      // returning null, so the campaign_id fallback that used to live here was
+      // unreachable — a human ref (CAMP-…) 500'd instead of falling through.
+      let campaign = await findCampaignByAnyId(id);
 
       if (!campaign) {
         return res.status(404).json({

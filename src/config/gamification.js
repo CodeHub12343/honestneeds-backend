@@ -16,6 +16,10 @@
 const XP_ACTIONS = {
   donate_per_dollar: 50,
   share_campaign: 100,
+  // Community (peer) boost — one user amplifying another's campaign.
+  // Deliberately well below share_campaign: boosting is a one-click action, so
+  // a large award would make it the cheapest XP on the platform to farm.
+  boost_campaign: 25,
   volunteer_per_hour: 200,
   pray: 25,
   refer_user: 500,

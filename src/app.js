@@ -460,6 +460,8 @@ const startServer = async () => {
     const ProcessShareHoldsJob = require('./jobs/ProcessShareHolds');
     const CompleteExpiredCampaignsJob = require('./jobs/CompleteExpiredCampaigns');
     const ExpireBoostsJob = require('./jobs/ExpireBoosts');
+    const DecayCommunityBoostsJob = require('./jobs/DecayCommunityBoosts');
+    const CheckSharePayoutReadinessJob = require('./jobs/CheckSharePayoutReadiness');
     const { executeMontlyDrawing } = require('./jobs/sweepstakesDrawing');
     const cron = require('node-cron');
     
@@ -503,6 +505,36 @@ const startServer = async () => {
     });
 
     logger.info('📅 ExpireBoosts job scheduled to run hourly');
+
+    // Schedule DecayCommunityBoosts daily — applies time decay to the COMMUNITY
+    // (peer) boost score so "trending" reflects current energy rather than one
+    // old burst of boosts. Paid boosts are handled by ExpireBoosts above.
+    const decayCommunityBoostsJob = cron.schedule('30 3 * * *', async () => {
+      logger.info('⏰ Starting scheduled DecayCommunityBoosts job');
+      try {
+        const result = await DecayCommunityBoostsJob.run();
+        logger.info('✅ DecayCommunityBoosts job completed', result);
+      } catch (error) {
+        logger.error('❌ DecayCommunityBoosts job failed', { error: error.message });
+      }
+    });
+
+    logger.info('📅 DecayCommunityBoosts job scheduled to run daily at 03:30 UTC');
+
+    // Schedule CheckSharePayoutReadiness daily — pauses paid sharing on Share
+    // Campaigns whose owner no longer has a usable payout method, so sharers
+    // stop accruing rewards nobody can settle.
+    const checkSharePayoutReadinessJob = cron.schedule('0 4 * * *', async () => {
+      logger.info('⏰ Starting scheduled CheckSharePayoutReadiness job');
+      try {
+        const result = await CheckSharePayoutReadinessJob.run();
+        logger.info('✅ CheckSharePayoutReadiness job completed', result);
+      } catch (error) {
+        logger.error('❌ CheckSharePayoutReadiness job failed', { error: error.message });
+      }
+    });
+
+    logger.info('📅 CheckSharePayoutReadiness job scheduled to run daily at 04:00 UTC');
 
     // ✅ NEW: Schedule sweepstakes drawing job to run monthly (1st of month at 2 AM UTC)
     const sweepstakesDrawingJob = cron.schedule('0 2 1 * *', async () => {

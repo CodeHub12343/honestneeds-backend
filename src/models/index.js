@@ -15,6 +15,8 @@ module.exports = {
   CampaignUpdate: require('./CampaignUpdate'),
   CampaignComment: require('./CampaignComment'),
   CampaignMilestone: require('./CampaignMilestone'),
+  CampaignUpgrade: require('./CampaignUpgrade'),
+  CampaignSupportBoost: require('./CampaignSupportBoost'),
   Category: require('./Category'),
 
   // Transaction & Donation related

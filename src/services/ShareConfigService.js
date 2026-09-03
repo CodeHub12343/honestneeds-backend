@@ -4,6 +4,7 @@
  */
 
 const Campaign = require('../models/Campaign');
+const PayoutReadinessService = require('./PayoutReadinessService');
 const User = require('../models/User');
 const winstonLogger = require('../utils/winstonLogger');
 
@@ -338,6 +339,19 @@ class ShareConfigService {
           statusCode: 403,
         };
       }
+
+      // ── Payout gate ──────────────────────────────────────────────────
+      // THIS is the moment the promise becomes real: from here on, sharers
+      // accrue rewards the creator personally owes them (trust-based model —
+      // HonestNeed never holds the money). So the creator must have somewhere
+      // to pay from before the switch flips.
+      //
+      // Deliberately placed here rather than on the Free → Share upgrade:
+      // every route into paid sharing passes through this function, whether the
+      // campaign became a Share Campaign via a creator upgrade, an admin
+      // upgrade, a sponsored upgrade, or was created as one. One check here
+      // covers all of them; a check on the upgrade covered only one door.
+      await PayoutReadinessService.assertReady(campaign.creator_id);
 
       const config = campaign.share_config || {};
 

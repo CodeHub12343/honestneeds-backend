@@ -100,6 +100,17 @@ const notificationPreferencesSchema = new mongoose.Schema(
         enabled: { type: Boolean, default: true },
         channels: [{ type: String, enum: ['email', 'in_app', 'push'] }],
       },
+      // Free → Share Campaign upgrade outcomes (the approval REQUEST itself is
+      // actionable and always delivered — see notificationTypes prefPath: null).
+      upgrades: {
+        enabled: { type: Boolean, default: true },
+        channels: [{ type: String, enum: ['email', 'in_app', 'push'] }],
+      },
+      // Community (peer) boosts on the user's campaigns.
+      boosts: {
+        enabled: { type: Boolean, default: true },
+        channels: [{ type: String, enum: ['email', 'in_app', 'push'] }],
+      },
     },
 
     // Marketing notifications

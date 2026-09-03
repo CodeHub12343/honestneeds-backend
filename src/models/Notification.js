@@ -86,6 +86,15 @@ const notificationSchema = new mongoose.Schema(
         'level_up',
         'streak_milestone',
         'leaderboard_rank',
+        // Free → Share Campaign upgrades
+        'campaign_upgraded',
+        'campaign_upgrade_requested',
+        'campaign_upgrade_approved',
+        'campaign_upgrade_rejected',
+        'share_campaign_payout_method_invalid',
+        // Community (peer) boosts
+        'campaign_boosted',
+        'campaign_boost_milestone',
         // Messaging & system
         'new_message',
         'system_alert',

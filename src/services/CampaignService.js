@@ -8,6 +8,9 @@ const { v4: uuidv4 } = require('uuid');
 const mongoose = require('mongoose');
 const Campaign = require('../models/Campaign');
 const CampaignMetricsService = require('./CampaignMetricsService');
+const PayoutReadinessService = require('./PayoutReadinessService');
+const FeatureFlagService = require('./FeatureFlagService');
+const CampaignEventAnalyticsService = require('./CampaignEventAnalyticsService');
 const { validateCampaignCreation, validateCampaignUpdate } = require('../validators/campaignValidators');
 const { EventEmitter } = require('events');
 const winstonLogger = require('../utils/winstonLogger');
@@ -481,6 +484,43 @@ class CampaignService {
         // least one reward are set, AND the creator accepted the agreement to pay
         // sharers directly. `committed_budget_remaining` is the liability counter
         // decremented as conversions accrue owed rewards.
+        // A Share Campaign is a PROMISE TO PAY: under the trust-based model the
+        // creator settles each sharer directly, off-platform. Consent alone only
+        // proves intent — it does not prove the creator has anywhere to be paid
+        // from or any details to give a sharer. Without this gate a Share
+        // Campaign could be created by someone who can never pay anyone, which
+        // is exactly what used to happen here.
+        //
+        // The rule is identical to the one the live payout path applies
+        // (PayoutReadinessService), so a creator can never pass one gate and
+        // fail the other.
+        // Three-state gate. Requiring a payout method to CREATE a Share
+        // Campaign refuses creators who could do this yesterday, so it ships
+        // behind a mode switch:
+        //   enforce — refuse (the end state)
+        //   warn    — record who WOULD be refused, then let them through, so
+        //             the block rate is measured before anyone is blocked
+        //   off     — no check (pre-launch behaviour)
+        const gateMode = await FeatureFlagService.getMode('share_campaign_payout_gate');
+
+        if (gateMode === 'enforce') {
+          await PayoutReadinessService.assertReady(creatorObjectId);
+        } else if (gateMode === 'warn') {
+          const readiness = await PayoutReadinessService.getReadiness(creatorObjectId);
+          if (!readiness.ready) {
+            winstonLogger.warn(
+              '⚠️ CampaignService: Share Campaign created without a usable payout method (gate in warn mode)',
+              { creator_id: String(creatorObjectId), reason_code: readiness.code }
+            );
+            // Same funnel signal an enforced refusal would produce, so the
+            // block rate can be read before switching to enforce.
+            await CampaignEventAnalyticsService.recordShareCampaignGateWarned({
+              actorId: creatorObjectId,
+              reasonCode: readiness.code,
+            });
+          }
+        }
+
         if (!normalizedData.payout_consent) {
           throw {
             code: 'PAYOUT_CONSENT_REQUIRED',
@@ -1033,6 +1073,7 @@ class CampaignService {
 
       // Sort mapping. Boosted campaigns are always surfaced first for the
       // default "trending" order; explicit sorts honour the user's choice.
+      const communityBoostRanks = await FeatureFlagService.isEnabled('community_boost_ranking');
       let sortStage;
       switch (sort) {
         case 'newest':
@@ -1049,7 +1090,20 @@ class CampaignService {
           break;
         case 'trending':
         default:
-          sortStage = { is_boosted: -1, boost_weight: -1, created_at: -1 };
+          // Paid boosts (is_boosted/boost_weight) rank FIRST and always outrank
+          // community boosts. If a free peer action could outrank the $20 pro
+          // tier, the paid product would lose its value.
+          // Community boost only influences ranking once explicitly enabled.
+          // This is the step that could cannibalise the paid boost tier, so it
+          // is switchable independently of the boost feature itself.
+          sortStage = communityBoostRanks
+            ? {
+                is_boosted: -1,
+                boost_weight: -1,
+                community_boost_score: -1,
+                created_at: -1,
+              }
+            : { is_boosted: -1, boost_weight: -1, created_at: -1 };
           break;
       }
       pipeline.push({ $sort: sortStage });

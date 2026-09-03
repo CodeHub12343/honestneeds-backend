@@ -738,6 +738,59 @@ const campaignSchema = new mongoose.Schema(
       index: true,
     },
 
+    // ── Community (peer) boost ────────────────────────────────────────────
+    // Distinct from the paid boost flags above. `is_boosted`/`boost_weight`
+    // come from a creator's own PAID Stripe purchase (CampaignBoost); these
+    // come from OTHER users freely amplifying the campaign
+    // (CampaignSupportBoost). Community score ranks strictly BELOW paid boosts
+    // in the trending sort so the paid product keeps its value.
+    //
+    // `community_boost_score` is time-decayed (see jobs/DecayCommunityBoosts),
+    // so a campaign cannot coast on old boosts.
+    community_boost_score: {
+      type: Number,
+      default: 0,
+      min: 0,
+      index: true,
+    },
+    community_boost_count: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    last_community_boost_at: {
+      type: Date,
+      default: null,
+    },
+
+    // ── Free → Share Campaign upgrade provenance ──────────────────────────
+    // Records that this campaign STARTED as one type and was upgraded, without
+    // introducing a second mutable type field. `original_campaign_type` is null
+    // for campaigns that were never upgraded.
+    upgrade_meta: {
+      original_campaign_type: {
+        type: String,
+        enum: ['fundraising', 'sharing', null],
+        default: null,
+      },
+      upgraded_at: { type: Date, default: null },
+      upgraded_by: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        default: null,
+      },
+      upgrade_initiator_type: {
+        type: String,
+        enum: ['creator', 'sponsor', 'admin', null],
+        default: null,
+      },
+      upgrade_id: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'CampaignUpgrade',
+        default: null,
+      },
+    },
+
     // CA-19: Milestone celebrations — percentages already celebrated (avoid duplicates)
     milestones_celebrated: {
       type: [Number],
