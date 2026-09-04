@@ -113,32 +113,62 @@ const sendMail = async ({ to, subject, html, text }) => {
     // Brevo's transactional API over HTTPS. Preferred over their SMTP relay on
     // PaaS hosts, which commonly block outbound SMTP ports; port 443 cannot be
     // blocked the same way.
-    const response = await axios.post(
-      'https://api.brevo.com/v3/smtp/email',
-      {
-        sender: { email: FROM_EMAIL, name: FROM_NAME },
-        to: [{ email: to }],
-        subject,
-        htmlContent: html,
-        ...(text ? { textContent: text } : {}),
-      },
-      {
-        headers: { 'api-key': BREVO_API_KEY, 'content-type': 'application/json' },
-        timeout: 15000,
-      }
-    );
+    let response;
+    try {
+      response = await axios.post(
+        'https://api.brevo.com/v3/smtp/email',
+        {
+          sender: { email: FROM_EMAIL, name: FROM_NAME },
+          to: [{ email: to }],
+          subject,
+          htmlContent: html,
+          ...(text ? { textContent: text } : {}),
+        },
+        {
+          headers: { 'api-key': BREVO_API_KEY, 'content-type': 'application/json' },
+          timeout: 15000,
+        }
+      );
+    } catch (err) {
+      // An axios error's .message is only "Request failed with status code 400",
+      // which hides WHY. Brevo puts the actual reason in the response body
+      // (unverified sender, bad key, quota) and the caller only logs .message —
+      // so without this the operator gets an opaque 500 and nothing to act on.
+      const detail = err.response?.data
+        ? JSON.stringify(err.response.data)
+        : err.message;
+      const wrapped = new Error(`Brevo API rejected the send: ${detail}`);
+      wrapped.code = err.response?.data?.code || 'BREVO_SEND_FAILED';
+      wrapped.statusCode = err.response?.status;
+      logger.error('Brevo API send failed', {
+        to,
+        from: FROM_EMAIL,
+        status: err.response?.status,
+        body: err.response?.data,
+      });
+      throw wrapped;
+    }
     logger.info('Email sent via Brevo API', { to, subject, messageId: response.data?.messageId });
     return { provider: 'brevo', messageId: response.data?.messageId };
   }
 
   if (EMAIL_MODE === 'sendgrid') {
-    const [response] = await sendgrid.send({
-      to,
-      from: { email: FROM_EMAIL, name: FROM_NAME },
-      subject,
-      html,
-      ...(text ? { text } : {}),
-    });
+    let response;
+    try {
+      [response] = await sendgrid.send({
+        to,
+        from: { email: FROM_EMAIL, name: FROM_NAME },
+        subject,
+        html,
+        ...(text ? { text } : {}),
+      });
+    } catch (err) {
+      // Same reasoning as the Brevo branch: SendGrid buries the reason in
+      // response.body, not in .message.
+      const detail = err.response?.body ? JSON.stringify(err.response.body) : err.message;
+      logger.error('SendGrid send failed', { to, from: FROM_EMAIL, body: err.response?.body });
+      throw new Error(`SendGrid rejected the send: ${detail}`);
+    }
     logger.info('Email sent via SendGrid', { to, subject, status: response?.statusCode });
     return { provider: 'sendgrid', statusCode: response?.statusCode };
   }
