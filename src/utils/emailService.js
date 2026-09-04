@@ -6,36 +6,115 @@
 const nodemailer = require('nodemailer');
 const { logger } = require('./logger');
 
-// Initialize transporter (configure based on your email provider)
-const createTransporter = () => {
-  // For production, use Gmail, SendGrid, AWS SES, or other SMTP service
-  // Configuration stored in environment variables
-  
-  if (process.env.NODE_ENV === 'production') {
-    // Production transporter (e.g., SendGrid, AWS SES, Gmail)
-    return nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: parseInt(process.env.SMTP_PORT || '587'),
-      secure: process.env.SMTP_SECURE === 'true', // true for 465, false for other ports
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASSWORD,
-      },
-    });
-  } else {
-    // Development transporter (Ethereal for testing)
-    return nodemailer.createTransport({
-      host: process.env.SMTP_HOST || 'smtp.mailtrap.io',
-      port: parseInt(process.env.SMTP_PORT || '2525'),
-      auth: {
-        user: process.env.SMTP_USER || 'test',
-        pass: process.env.SMTP_PASSWORD || 'test',
-      },
-    });
+// ── Transport selection ───────────────────────────────────────────────────
+//
+// Two ways to send, chosen by what is configured:
+//
+//   1. SendGrid Web API  (SENDGRID_API_KEY set)  — preferred in production.
+//      Sends over HTTPS, so it works on hosts that block outbound SMTP ports.
+//      Render is one of them, which is why this is the default when a key
+//      exists.
+//   2. SMTP via nodemailer (SMTP_HOST set) — for local Mailhog/Mailtrap and
+//      for anyone who would rather use their own relay.
+//
+// If NEITHER is configured we fail loudly instead of pretending. A password
+// reset that silently goes nowhere is worse than an error: the user is told
+// "check your email", waits, and never gets in. The caller
+// (authController.requestPasswordReset) already clears the reset token when a
+// send throws, so failing here leaves no half-finished state.
+//
+// Env names are accepted in both SMTP_* and EMAIL_* spellings because both are
+// already in use across this project's .env files.
+const pick = (...names) => {
+  for (const n of names) {
+    if (process.env[n]) return process.env[n];
   }
+  return undefined;
 };
 
-const transporter = createTransporter();
+const SENDGRID_API_KEY = pick('SENDGRID_API_KEY');
+const SMTP_HOST = pick('SMTP_HOST', 'EMAIL_HOST');
+const SMTP_PORT = parseInt(pick('SMTP_PORT', 'EMAIL_PORT') || '587', 10);
+const SMTP_USER = pick('SMTP_USER', 'EMAIL_USER');
+const SMTP_PASSWORD = pick('SMTP_PASSWORD', 'EMAIL_PASSWORD');
+const SMTP_SECURE = (pick('SMTP_SECURE') || '') === 'true' || SMTP_PORT === 465;
+
+const FROM_EMAIL =
+  pick('SENDER_EMAIL', 'FROM_EMAIL', 'SENDGRID_FROM_EMAIL') || 'noreply@honestneed.com';
+const FROM_NAME = pick('FROM_NAME') || 'HonestNeed';
+
+let sendgrid = null;
+if (SENDGRID_API_KEY) {
+  // eslint-disable-next-line global-require
+  sendgrid = require('@sendgrid/mail');
+  sendgrid.setApiKey(SENDGRID_API_KEY);
+}
+
+const transporter =
+  !SENDGRID_API_KEY && SMTP_HOST
+    ? nodemailer.createTransport({
+        host: SMTP_HOST,
+        port: SMTP_PORT,
+        secure: SMTP_SECURE,
+        // Mailhog and other local catchers accept unauthenticated mail; sending
+        // an empty auth block to them fails the connection.
+        auth: SMTP_USER ? { user: SMTP_USER, pass: SMTP_PASSWORD } : undefined,
+      })
+    : null;
+
+const EMAIL_MODE = SENDGRID_API_KEY ? 'sendgrid' : transporter ? 'smtp' : 'unconfigured';
+
+logger.info('Email transport initialised', {
+  mode: EMAIL_MODE,
+  from: FROM_EMAIL,
+  ...(EMAIL_MODE === 'smtp' ? { host: SMTP_HOST, port: SMTP_PORT, secure: SMTP_SECURE } : {}),
+});
+
+if (EMAIL_MODE === 'unconfigured') {
+  logger.error(
+    'Email is NOT configured — password reset and every other outbound email will fail. ' +
+      'Set SENDGRID_API_KEY (recommended), or SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASSWORD.'
+  );
+}
+
+/**
+ * Send one email through whichever transport is configured.
+ *
+ * @param {{to: string, subject: string, html: string, text?: string}} message
+ * @returns {Promise<object>} provider result
+ * @throws when email is not configured, or the provider rejects
+ */
+const sendMail = async ({ to, subject, html, text }) => {
+  if (EMAIL_MODE === 'unconfigured') {
+    const error = new Error(
+      'Email service is not configured. Set SENDGRID_API_KEY or SMTP_HOST on the server.'
+    );
+    error.code = 'EMAIL_NOT_CONFIGURED';
+    throw error;
+  }
+
+  if (EMAIL_MODE === 'sendgrid') {
+    const [response] = await sendgrid.send({
+      to,
+      from: { email: FROM_EMAIL, name: FROM_NAME },
+      subject,
+      html,
+      ...(text ? { text } : {}),
+    });
+    logger.info('Email sent via SendGrid', { to, subject, status: response?.statusCode });
+    return { provider: 'sendgrid', statusCode: response?.statusCode };
+  }
+
+  const info = await transporter.sendMail({
+    from: `"${FROM_NAME}" <${FROM_EMAIL}>`,
+    to,
+    subject,
+    html,
+    ...(text ? { text } : {}),
+  });
+  logger.info('Email sent via SMTP', { to, subject, messageId: info.messageId });
+  return { provider: 'smtp', messageId: info.messageId };
+};
 
 /**
  * Send password reset email
@@ -45,7 +124,10 @@ const transporter = createTransporter();
  */
 const sendPasswordResetEmail = async (email, resetToken, baseUrl) => {
   try {
-    const resetLink = `${baseUrl}/reset-password?token=${resetToken}`;
+    // Path segment, not a query string. The frontend route is
+    // app/(auth)/reset-password/[token] and reads params.token — a
+    // `?token=` link lands on a route that does not exist and 404s.
+    const resetLink = `${String(baseUrl).replace(/\/+$/, '')}/reset-password/${resetToken}`;
     
     const mailOptions = {
       from: process.env.SENDER_EMAIL || 'noreply@honestneed.com',
@@ -116,16 +198,23 @@ const sendPasswordResetEmail = async (email, resetToken, baseUrl) => {
       `,
     };
 
-    const info = await transporter.sendMail(mailOptions);
+    // Routed through sendMail so it works under SendGrid (HTTPS) as well as
+    // SMTP — `transporter` is null when a SendGrid key is configured.
+    const info = await sendMail({
+      to: mailOptions.to,
+      subject: mailOptions.subject,
+      html: mailOptions.html,
+      text: mailOptions.text,
+    });
     
     logger.info('Password reset email sent', {
       email,
-      messageId: info.messageId,
+      messageId: info.messageId || null,
     });
 
     return {
       success: true,
-      messageId: info.messageId,
+      messageId: info.messageId || null,
     };
   } catch (error) {
     logger.error('Failed to send password reset email', {
@@ -191,16 +280,23 @@ const sendWelcomeEmail = async (email, displayName) => {
       `,
     };
 
-    const info = await transporter.sendMail(mailOptions);
+    // Routed through sendMail so it works under SendGrid (HTTPS) as well as
+    // SMTP — `transporter` is null when a SendGrid key is configured.
+    const info = await sendMail({
+      to: mailOptions.to,
+      subject: mailOptions.subject,
+      html: mailOptions.html,
+      text: mailOptions.text,
+    });
     
     logger.info('Welcome email sent', {
       email,
-      messageId: info.messageId,
+      messageId: info.messageId || null,
     });
 
     return {
       success: true,
-      messageId: info.messageId,
+      messageId: info.messageId || null,
     };
   } catch (error) {
     logger.warn('Failed to send welcome email', {
@@ -282,17 +378,24 @@ const sendDonationConfirmationEmail = async (email, donationData) => {
       `,
     };
 
-    const info = await transporter.sendMail(mailOptions);
+    // Routed through sendMail so it works under SendGrid (HTTPS) as well as
+    // SMTP — `transporter` is null when a SendGrid key is configured.
+    const info = await sendMail({
+      to: mailOptions.to,
+      subject: mailOptions.subject,
+      html: mailOptions.html,
+      text: mailOptions.text,
+    });
     
     logger.info('Donation confirmation email sent', {
       email,
       transactionId,
-      messageId: info.messageId,
+      messageId: info.messageId || null,
     });
 
     return {
       success: true,
-      messageId: info.messageId,
+      messageId: info.messageId || null,
     };
   } catch (error) {
     logger.warn('Failed to send donation confirmation email', {
@@ -367,17 +470,24 @@ const sendNewMessageEmail = async (email, data) => {
       `,
     };
 
-    const info = await transporter.sendMail(mailOptions);
+    // Routed through sendMail so it works under SendGrid (HTTPS) as well as
+    // SMTP — `transporter` is null when a SendGrid key is configured.
+    const info = await sendMail({
+      to: mailOptions.to,
+      subject: mailOptions.subject,
+      html: mailOptions.html,
+      text: mailOptions.text,
+    });
 
     logger.info('New message email sent', {
       email,
       conversationId,
-      messageId: info.messageId,
+      messageId: info.messageId || null,
     });
 
     return {
       success: true,
-      messageId: info.messageId,
+      messageId: info.messageId || null,
     };
   } catch (error) {
     logger.warn('Failed to send new message email', {

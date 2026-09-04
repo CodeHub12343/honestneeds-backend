@@ -43,6 +43,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.104.2",
     "@google/genai": "^2.9.0",
+    "@sendgrid/mail": "^8.1.6",
     "axios": "^1.14.0",
     "bcryptjs": "^2.4.3",
     "cloudinary": "^1.41.3",
