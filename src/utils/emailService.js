@@ -4,6 +4,7 @@
  */
 
 const nodemailer = require('nodemailer');
+const axios = require('axios');
 const { logger } = require('./logger');
 
 // ── Transport selection ───────────────────────────────────────────────────
@@ -33,6 +34,7 @@ const pick = (...names) => {
 };
 
 const SENDGRID_API_KEY = pick('SENDGRID_API_KEY');
+const BREVO_API_KEY = pick('BREVO_API_KEY', 'SENDINBLUE_API_KEY');
 const SMTP_HOST = pick('SMTP_HOST', 'EMAIL_HOST');
 const SMTP_PORT = parseInt(pick('SMTP_PORT', 'EMAIL_PORT') || '587', 10);
 const SMTP_USER = pick('SMTP_USER', 'EMAIL_USER');
@@ -59,10 +61,23 @@ const transporter =
         // Mailhog and other local catchers accept unauthenticated mail; sending
         // an empty auth block to them fails the connection.
         auth: SMTP_USER ? { user: SMTP_USER, pass: SMTP_PASSWORD } : undefined,
+        // Fail fast. Some hosts (Render among them) silently drop outbound SMTP
+        // rather than refusing it, so without these the socket hangs until the
+        // platform's own timeout and the USER's request hangs with it — they see
+        // "this is taking longer than usual" and never learn what went wrong.
+        connectionTimeout: 10000,
+        greetingTimeout: 10000,
+        socketTimeout: 15000,
       })
     : null;
 
-const EMAIL_MODE = SENDGRID_API_KEY ? 'sendgrid' : transporter ? 'smtp' : 'unconfigured';
+const EMAIL_MODE = SENDGRID_API_KEY
+  ? 'sendgrid'
+  : BREVO_API_KEY
+    ? 'brevo'
+    : transporter
+      ? 'smtp'
+      : 'unconfigured';
 
 logger.info('Email transport initialised', {
   mode: EMAIL_MODE,
@@ -73,7 +88,8 @@ logger.info('Email transport initialised', {
 if (EMAIL_MODE === 'unconfigured') {
   logger.error(
     'Email is NOT configured — password reset and every other outbound email will fail. ' +
-      'Set SENDGRID_API_KEY (recommended), or SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASSWORD.'
+      'Set BREVO_API_KEY (recommended — sends over HTTPS), or SENDGRID_API_KEY, ' +
+      'or SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASSWORD.'
   );
 }
 
@@ -91,6 +107,28 @@ const sendMail = async ({ to, subject, html, text }) => {
     );
     error.code = 'EMAIL_NOT_CONFIGURED';
     throw error;
+  }
+
+  if (EMAIL_MODE === 'brevo') {
+    // Brevo's transactional API over HTTPS. Preferred over their SMTP relay on
+    // PaaS hosts, which commonly block outbound SMTP ports; port 443 cannot be
+    // blocked the same way.
+    const response = await axios.post(
+      'https://api.brevo.com/v3/smtp/email',
+      {
+        sender: { email: FROM_EMAIL, name: FROM_NAME },
+        to: [{ email: to }],
+        subject,
+        htmlContent: html,
+        ...(text ? { textContent: text } : {}),
+      },
+      {
+        headers: { 'api-key': BREVO_API_KEY, 'content-type': 'application/json' },
+        timeout: 15000,
+      }
+    );
+    logger.info('Email sent via Brevo API', { to, subject, messageId: response.data?.messageId });
+    return { provider: 'brevo', messageId: response.data?.messageId };
   }
 
   if (EMAIL_MODE === 'sendgrid') {
