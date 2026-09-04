@@ -10,7 +10,9 @@
 
 const mongoose = require('mongoose');
 const Campaign = require('../models/Campaign');
-const Share = require('../models/Share');
+// Share.js exports { ShareRecord, ShareBudgetReload } — requiring the module
+// itself yields a plain object, so Share.aggregate() was undefined at runtime.
+const { ShareRecord: Share } = require('../models/Share');
 const winstonLogger = require('../utils/winstonLogger');
 const CampaignMilestoneService = require('../services/CampaignMilestoneService');
 

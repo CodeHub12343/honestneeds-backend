@@ -1690,7 +1690,9 @@ const CampaignController = {
       });
 
       // Query shares grouped by status and platform
-      const Share = require('../models/Share');
+      // Share.js exports { ShareRecord, ShareBudgetReload }; the bare module has
+      // no .aggregate().
+      const { ShareRecord: Share } = require('../models/Share');
       const shareEarnings = await Share.aggregate([
         {
           $match: {
@@ -1867,7 +1869,9 @@ const CampaignController = {
       });
 
       const Campaign = require('../models/Campaign');
-      const Share = require('../models/Share');
+      // Share.js exports { ShareRecord, ShareBudgetReload }; the bare module has
+      // no .aggregate().
+      const { ShareRecord: Share } = require('../models/Share');
       const mongoose = require('mongoose');
 
       const campaign = await Campaign.findOne({
@@ -1996,7 +2000,9 @@ const CampaignController = {
       });
 
       const Campaign = require('../models/Campaign');
-      const Share = require('../models/Share');
+      // Share.js exports { ShareRecord, ShareBudgetReload }; the bare module has
+      // no .aggregate().
+      const { ShareRecord: Share } = require('../models/Share');
       const mongoose = require('mongoose');
 
       const campaign = await Campaign.findOne({
