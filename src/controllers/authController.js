@@ -437,11 +437,14 @@ const requestPasswordReset = async (req, res, next) => {
       user.password_reset_expires = null;
       await user.save();
 
-      logger.error('Failed to send password reset email', {
-        userId: user._id,
-        email,
-        error: emailError.message,
-      });
+      // The reason goes in the MESSAGE, not just the metadata object: the
+      // console logger does not render metadata, so "Failed to send password
+      // reset email" was all an operator saw — the provider's actual
+      // explanation (unverified sender, bad key, quota) was invisible.
+      logger.error(
+        `Failed to send password reset email [${emailError.code || 'NO_CODE'}]: ${emailError.message}`,
+        { userId: user._id, email, error: emailError.message }
+      );
 
       const error = new Error('Failed to send password reset email. Please try again later.');
       error.statusCode = 500;
