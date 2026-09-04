@@ -7,7 +7,9 @@ const crypto = require('crypto');
 const userService = require('../services/userService');
 const { logger } = require('../utils/logger');
 const { generateToken } = require('../utils/jwt');
-const { hashPassword, verifyPassword } = require('../utils/passwordUtils');
+// hashPassword is intentionally not imported: every write to password_hash
+// goes through the User pre-save hook, which does the hashing.
+const { verifyPassword } = require('../utils/passwordUtils');
 const { sendPasswordResetEmail } = require('../utils/emailService');
 const {
   validatePasswordResetRequest,
@@ -552,11 +554,12 @@ const resetPassword = async (req, res, next) => {
       throw error;
     }
 
-    // Hash new password
-    const hashedPassword = await hashPassword(password);
-
-    // Update user password and clear reset token
-    user.password_hash = hashedPassword;
+    // Assign the PLAINTEXT password. The User pre-save hook hashes
+    // password_hash whenever it is modified, so hashing here too stored
+    // bcrypt(bcrypt(password)) — which no login could ever match, leaving the
+    // user locked out by the very reset that was meant to let them back in.
+    // register() and changePassword() both assign plaintext for this reason.
+    user.password_hash = password;
     user.password_reset_token = null;
     user.password_reset_expires = null;
     await user.save();
