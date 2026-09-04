@@ -285,12 +285,18 @@ const sendPasswordResetEmail = async (email, resetToken, baseUrl) => {
       messageId: info.messageId || null,
     };
   } catch (error) {
-    logger.error('Failed to send password reset email', {
+    // Keep the CAUSE. Rethrowing a generic message here discarded the
+    // provider's explanation (blocked SMTP port, unverified sender, bad key),
+    // so the operator saw the same opaque line no matter what went wrong.
+    logger.error(`Failed to send password reset email: ${error.message}`, {
       email,
       error: error.message,
     });
 
-    throw new Error('Failed to send password reset email. Please try again later.');
+    const wrapped = new Error(`Failed to send password reset email: ${error.message}`);
+    wrapped.code = error.code || 'EMAIL_SEND_FAILED';
+    wrapped.cause = error;
+    throw wrapped;
   }
 };
 

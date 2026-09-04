@@ -75,6 +75,16 @@ try {
 
 const app = express();
 
+// Render (and any PaaS) terminates TLS at a proxy and forwards the real client
+// IP in X-Forwarded-For. Without this, express-rate-limit sees the proxy's IP
+// for every request — so all users share one rate-limit bucket, and it logs
+// ERR_ERL_UNEXPECTED_X_FORWARDED_FOR on each call.
+//
+// `1` trusts exactly one hop (the platform proxy) rather than `true`, which
+// would trust the whole chain and let a client spoof its own IP by sending a
+// forged X-Forwarded-For header.
+app.set('trust proxy', 1);
+
 // Security Middleware
 app.use(helmet());
 
