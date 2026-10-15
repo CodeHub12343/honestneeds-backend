@@ -90,6 +90,56 @@
       "rules": {
         "no-unused-expressions": "off"
       }
+    },
+    {
+      "comment": "Phase 0 (2026-10): new validators must use Zod under src/schemas/, not Joi under src/validators/. Existing Joi files are allowed to keep importing joi; this rule bans NEW ones only.",
+      "files": [
+        "src/schemas/**/*.js",
+        "src/controllers/**/*.js",
+        "src/routes/**/*.js",
+        "src/services/**/*.js"
+      ],
+      "excludedFiles": [
+        "src/validators/**/*"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "joi",
+                "message": "Use Zod (src/schemas/) for new validators. See src/validators/README.md."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "comment": "Phase 0 (2026-10): AuditLog writes go through src/services/AuditLogger.js, never direct model calls, so audit coverage can be reasoned about centrally.",
+      "files": [
+        "src/**/*.js"
+      ],
+      "excludedFiles": [
+        "src/services/AuditLogger.js",
+        "src/models/AuditLog.js",
+        "scripts/migrations/**/*",
+        "src/controllers/admin/AuditController.js"
+      ],
+      "rules": {
+        "no-restricted-syntax": [
+          "error",
+          {
+            "selector": "CallExpression[callee.object.name='AuditLog'][callee.property.name='create']",
+            "message": "Use AuditLogger.record(...) from src/services/AuditLogger.js — never AuditLog.create() directly."
+          },
+          {
+            "selector": "CallExpression[callee.object.name='AuditLog'][callee.property.name='createLog']",
+            "message": "Use AuditLogger.record(...) from src/services/AuditLogger.js — never AuditLog.createLog() directly."
+          }
+        ]
+      }
     }
   ]
 }

@@ -96,6 +96,29 @@ const FLAG_DEFINITIONS = {
     description:
       'off = no check; warn = measure who would be blocked but let them through; enforce = refuse. Start on warn, read the block rate, then enforce.',
   },
+
+  // Phase 2 — Persona-hosted identity verification. Off by default so a bad
+  // deploy without PERSONA_API_KEY cannot accidentally bill or route traffic.
+  // Turn on via the admin UI once PERSONA_API_KEY + PERSONA_TEMPLATE_ID +
+  // PERSONA_WEBHOOK_SECRET are set and the sandbox contract test is green.
+  persona_identity_v1: {
+    type: 'boolean',
+    default: false,
+    label: 'Persona identity verification',
+    description:
+      'When ON, new verifications flow through the Persona hosted inquiry. When OFF, callers fall back to the legacy upload + manual review flow. Scoped payloads supported.',
+  },
+
+  // Phase 6 — video promo rewards kill switch. OFF by default: a new deploy
+  // never pays out until an admin explicitly enables the feature. The video
+  // share endpoint still records the Share row with reward_status='skipped'.
+  video_promo_rewards: {
+    type: 'boolean',
+    default: false,
+    label: 'Video promo rewards',
+    description:
+      'Master kill switch for the Phase 6 share-to-earn flow. When OFF the share endpoint still records the share, no reward is reserved, and no funds move.',
+  },
 };
 
 class FeatureFlagService {
@@ -222,6 +245,144 @@ class FeatureFlagService {
     }));
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Phase 0 extensions — scope-aware evaluation + admin write helpers.
+//
+// The methods below are ADDITIVE. Callers that use the existing
+// `isEnabled(name)` and `getMode(name)` keep working unchanged. New callers
+// (Phase 2+ features) use `isEnabledFor(name, context)` to get:
+//   - env scope       (production|staging|development|test)
+//   - role scope      (user has at least one listed role)
+//   - user-id scope   (explicit allowlist)
+//   - percentage      (stable per userId via sha256)
+//
+// A flag whose stored value is one of these scoped payloads overrides the
+// boolean/mode interpretation. If any axis excludes the subject the flag is
+// off for them; the inverse (axes they match) does NOT force it on — the
+// `enabled` field is the master switch inside the scoped payload.
+// ─────────────────────────────────────────────────────────────────────────
+
+const crypto = require('crypto');
+
+function isScopedValue(v) {
+  return v && typeof v === 'object' && !Array.isArray(v);
+}
+
+function matchesEnv(scoped, env) {
+  if (!scoped.envs || scoped.envs.length === 0) return true;
+  return scoped.envs.includes(env);
+}
+
+function matchesRole(scoped, role) {
+  if (!scoped.roles || scoped.roles.length === 0) return true;
+  return role && scoped.roles.includes(role);
+}
+
+function matchesUserAllowlist(scoped, userId) {
+  if (!scoped.user_ids || scoped.user_ids.length === 0) return null; // not configured
+  return !!(userId && scoped.user_ids.includes(String(userId)));
+}
+
+function matchesPercentage(scoped, name, userId) {
+  if (scoped.percentage === undefined || scoped.percentage === null) return true;
+  const pct = Math.max(0, Math.min(100, Number(scoped.percentage) || 0));
+  if (pct >= 100) return true;
+  if (pct <= 0) return false;
+  const key = `${name}:${userId || 'anon'}`;
+  const hash = crypto.createHash('sha256').update(key).digest();
+  // Take first 4 bytes as uint32, map to [0, 100).
+  const n = hash.readUInt32BE(0);
+  const bucket = (n % 10000) / 100; // 0.00..99.99
+  return bucket < pct;
+}
+
+/**
+ * Context-aware evaluation. For flags whose stored value is a scoped payload
+ * `{ enabled, roles[], user_ids[], envs[], percentage }`.
+ *
+ * - For a plain boolean flag value, returns that boolean (context ignored).
+ * - For a mode flag value, returns `value !== 'off'`.
+ * - For a scoped payload, applies the axes above and returns a boolean.
+ *
+ * @param {string} name
+ * @param {Object} [ctx] {userId, role, env}
+ * @returns {Promise<boolean>}
+ */
+FeatureFlagService.isEnabledFor = async function isEnabledFor(name, ctx = {}) {
+  const flags = await FeatureFlagService.getAll();
+  const value = flags[name];
+  const env = ctx.env || process.env.NODE_ENV || 'development';
+
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') return value !== 'off';
+  if (!isScopedValue(value)) return false;
+
+  if (value.enabled === false) return false;
+  if (!matchesEnv(value, env)) return false;
+  if (!matchesRole(value, ctx.role)) return false;
+
+  const allowlistHit = matchesUserAllowlist(value, ctx.userId);
+  if (allowlistHit === true) return value.enabled !== false;
+  if (allowlistHit === false && (value.percentage === undefined || value.percentage === null)) {
+    return false;
+  }
+
+  if (!matchesPercentage(value, name, ctx.userId)) return false;
+
+  return value.enabled !== false;
+};
+
+/**
+ * Raw stored value for a flag (post-merge with declared defaults).
+ * Primarily for admin UI + audit before/after capture.
+ */
+FeatureFlagService.getRawValue = async function getRawValue(name) {
+  const flags = await FeatureFlagService.getAll();
+  return flags[name];
+};
+
+/**
+ * Persist a single flag value to PlatformSettings, invalidate cache, return
+ * the resulting merged value.
+ */
+FeatureFlagService.set = async function set(name, value) {
+  const doc = (await PlatformSettings.getByKey(FLAG_KEY)) || null;
+  const current = doc && doc.value && typeof doc.value === 'object' ? { ...doc.value } : {};
+  current[name] = value;
+  await PlatformSettings.updateByKey(FLAG_KEY, current, null);
+  FeatureFlagService.invalidate();
+  const flags = await FeatureFlagService.getAll();
+  return flags[name];
+};
+
+/**
+ * Bulk write: merge `flagsObj` over the stored values atomically from the
+ * caller's point of view (single updateByKey write). Returns merged flags.
+ */
+FeatureFlagService.setBulk = async function setBulk(flagsObj) {
+  const doc = (await PlatformSettings.getByKey(FLAG_KEY)) || null;
+  const current = doc && doc.value && typeof doc.value === 'object' ? { ...doc.value } : {};
+  for (const [k, v] of Object.entries(flagsObj || {})) current[k] = v;
+  await PlatformSettings.updateByKey(FLAG_KEY, current, null);
+  FeatureFlagService.invalidate();
+  return FeatureFlagService.getAll();
+};
+
+/**
+ * Drop a stored override for a flag so it falls back to declared default.
+ */
+FeatureFlagService.reset = async function reset(name) {
+  const doc = (await PlatformSettings.getByKey(FLAG_KEY)) || null;
+  const current = doc && doc.value && typeof doc.value === 'object' ? { ...doc.value } : {};
+  if (name in current) {
+    delete current[name];
+    await PlatformSettings.updateByKey(FLAG_KEY, current, null);
+    FeatureFlagService.invalidate();
+  }
+  const flags = await FeatureFlagService.getAll();
+  return flags[name];
+};
 
 module.exports = FeatureFlagService;
 module.exports.FLAG_DEFINITIONS = FLAG_DEFINITIONS;

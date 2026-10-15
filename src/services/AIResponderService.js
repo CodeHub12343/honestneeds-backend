@@ -543,6 +543,124 @@ ${JSON.stringify(context)}`;
   }
 }
 
+/**
+ * draftSupportReply — TASK-9.5.
+ *
+ * Pure drafting: reads the ticket + its last ~10 messages, asks the model
+ * for a plain-text reply the staff member can edit before sending. Returns
+ * `{ draft, confidence, warnings[] }`. Explicitly does NOT create a
+ * SupportMessage — the staff flow is: fetch draft → edit → POST the normal
+ * staff reply endpoint (which carries `ai_drafted:true` for the audit).
+ *
+ * Confidence is a heuristic 0..1 the UI can show as a bar; it comes from the
+ * model's own self-estimate, clamped. Warnings surface things the staff
+ * should look at before sending (e.g. the model couldn't ground part of
+ * the answer in the knowledge base).
+ */
+AIResponderService.draftSupportReply = async function draftSupportReply({ ticketId, actorId: _actorId }) {
+  const { SupportTicket, SupportMessage } = require('../models/SupportTicket');
+
+  const ticket = await SupportTicket.findById(ticketId).populate('user_id', 'display_name email locale');
+  if (!ticket) {
+    throw new AIResponderError('Ticket not found', 404, 'TICKET_NOT_FOUND');
+  }
+  if (ticket.status === 'closed') {
+    throw new AIResponderError('Ticket is closed', 400, 'TICKET_CLOSED');
+  }
+
+  const recent = await SupportMessage.find({ ticket_id: ticket._id })
+    .sort({ created_at: -1 })
+    .limit(10)
+    .lean();
+  const history = recent
+    .reverse()
+    .filter((m) => !m.internal)
+    .map((m) => ({
+      role: m.author_role === 'staff' ? 'assistant' : 'user',
+      content: m.body,
+    }));
+
+  if (!AIResponderService.isEnabled()) {
+    return {
+      draft:
+        `Hi ${(ticket.user_id && ticket.user_id.display_name) || 'there'},\n\n` +
+        `Thanks for reaching out about "${ticket.subject}". A member of our team ` +
+        `will look into this and get back to you shortly.\n\nBest,\nHonestNeed Support`,
+      confidence: 0,
+      warnings: ['AI drafting disabled or unconfigured — this is a deterministic fallback.'],
+      ai_drafted: true,
+    };
+  }
+
+  const system = `You draft support reply emails for HonestNeed, a crowdfunding platform.
+Follow these rules without exception:
+
+1. Return JSON only, matching the schema given to the tool.
+2. The reply must be plain prose, 2–5 short paragraphs, warm and specific — NEVER a bulleted FAQ dump.
+3. Never promise a refund, a rate change, or a legal outcome. If the user is asking about one of those, defer to the human: "A teammate will follow up here with details."
+4. Never invent URLs, policy clauses, or facts you do not see in the ticket. If unsure, say so plainly.
+5. Address the user by their display name if provided; otherwise "Hi there".
+6. Sign off: "Best,\\nHonestNeed Support".
+
+Return a 0..1 confidence that reflects how well the ticket is grounded in the information you have.
+Return a short list of warnings for the staff reviewer (e.g. "User asked about a refund amount — defer to a human.").`;
+
+  const SCHEMA = {
+    type: 'object',
+    additionalProperties: false,
+    required: ['draft', 'confidence'],
+    properties: {
+      draft: { type: 'string', minLength: 20, maxLength: 4000 },
+      confidence: { type: 'number', minimum: 0, maximum: 1 },
+      warnings: { type: 'array', items: { type: 'string', maxLength: 240 }, maxItems: 6 },
+    },
+  };
+
+  const ticketContext = {
+    subject: ticket.subject,
+    category: ticket.category,
+    priority: ticket.priority,
+    user: {
+      display_name: ticket.user_id?.display_name || null,
+      locale: ticket.user_id?.locale || 'en',
+    },
+  };
+
+  const messages = [
+    ...history,
+    {
+      role: 'user',
+      content: `TICKET CONTEXT (JSON): ${JSON.stringify(ticketContext)}\n\nPlease draft the next support reply.`,
+    },
+  ];
+
+  try {
+    const { data } = await AIProviderService.completeJSON({
+      feature: 'support_draft_reply',
+      effort: aiConfig.effort.advisor,
+      maxTokens: aiConfig.maxTokens.medium,
+      schema: SCHEMA,
+      system,
+      messages,
+    });
+
+    const confidence = Math.max(0, Math.min(1, Number(data.confidence) || 0));
+    return {
+      draft: String(data.draft).slice(0, 4000),
+      confidence,
+      warnings: Array.isArray(data.warnings) ? data.warnings.slice(0, 6) : [],
+      ai_drafted: true,
+    };
+  } catch (err) {
+    winstonLogger.warn('AIResponderService.draftSupportReply failed', { message: err.message });
+    throw new AIResponderError(
+      'Could not draft a reply right now — compose one manually.',
+      502,
+      'AI_DRAFT_FAILED'
+    );
+  }
+};
+
 module.exports = AIResponderService;
 module.exports.AIResponderError = AIResponderError;
 module.exports.ALLOWED_ACTION_LINKS = ALLOWED_ACTION_LINKS;

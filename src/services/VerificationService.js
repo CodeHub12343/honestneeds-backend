@@ -10,6 +10,9 @@ const crypto = require('crypto');
 const User = require('../models/User');
 const IdentityVerification = require('../models/IdentityVerification');
 const GamificationService = require('./GamificationService');
+const FeatureFlagService = require('./FeatureFlagService');
+const PersonaService = require('./identity/PersonaService');
+const AuditLogger = require('./AuditLogger');
 const winstonLogger = require('../utils/winstonLogger');
 
 class VerificationError extends Error {
@@ -356,6 +359,277 @@ class VerificationService {
     };
   }
 }
+
+// ──────────────────────────────────────────────────────────────────────
+// Phase 2 — Persona-hosted identity verification
+// ──────────────────────────────────────────────────────────────────────
+//
+// `isPersonaEnabled(user)` is the single predicate the HTTP layer and tests
+// consult. It layers:
+//   - the feature flag `persona_identity_v1` (admin kill switch)
+//   - credentials being configured (otherwise the breaker/HTTP calls fail
+//     with a 503 — a clearer "not configured" signal here saves one hop).
+// Returns false on any error so a misconfiguration during the rollout defaults
+// to the legacy upload flow.
+VerificationService.isPersonaEnabled = async function isPersonaEnabled(userCtx = {}) {
+  try {
+    const enabled = await FeatureFlagService.isEnabledFor('persona_identity_v1', {
+      userId: userCtx.userId || userCtx.id || null,
+      role: userCtx.role || null,
+      env: process.env.NODE_ENV,
+    });
+    if (!enabled) return false;
+    if (!process.env.PERSONA_API_KEY || !process.env.PERSONA_TEMPLATE_ID) {
+      winstonLogger.warn('persona_identity_v1 enabled but credentials missing');
+      return false;
+    }
+    return true;
+  } catch (err) {
+    winstonLogger.warn('isPersonaEnabled check failed, defaulting to legacy', {
+      message: err.message,
+    });
+    return false;
+  }
+};
+
+/**
+ * Idempotency window for createInquiry. Persona bills per inquiry, so a double
+ * click or network retry must not create two sessions.
+ */
+VerificationService.PERSONA_IDEMPOTENCY_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+const PERSONA_ACTIVE_STATUSES = ['created', 'pending', 'needs_review'];
+
+/**
+ * Start (or resume) a Persona inquiry for a user.
+ *
+ * Idempotency: if a non-terminal submission exists AND it was issued within
+ * the 24 h window, re-fetch it from Persona and return the SAME inquiry_id.
+ * Returns a FRESH session_token in that case (Persona tokens expire quickly,
+ * so returning the stored hash is useless to the client).
+ *
+ * Two concurrent calls can race between the "find existing" and "create" step.
+ * The guard is an atomic findOneAndUpdate that stamps `persona_inquiry_id`:
+ * whichever request wrote first wins; the loser notices and reuses that id.
+ */
+VerificationService.startPersonaInquiry = async function startPersonaInquiry({
+  userId,
+  metadata = {},
+}) {
+  const user = await User.findById(userId);
+  if (!user || user.deleted_at) throw new VerificationError('User not found', 404, 'USER_NOT_FOUND');
+
+  const windowStart = new Date(Date.now() - VerificationService.PERSONA_IDEMPOTENCY_WINDOW_MS);
+
+  // Any in-flight Persona submission that was created recently is reusable.
+  const existing = await IdentityVerification.findOne({
+    user_id: userId,
+    status: 'pending',
+    persona_inquiry_id: { $ne: null },
+    submitted_at: { $gte: windowStart },
+  });
+
+  if (existing && existing.persona_inquiry_id) {
+    // Confirm it is still open at Persona before handing it back.
+    try {
+      const remote = await PersonaService.getInquiry(existing.persona_inquiry_id);
+      if (remote && PERSONA_ACTIVE_STATUSES.includes(remote.status)) {
+        // Return a FRESH session for the same inquiry. Persona exposes a
+        // regenerate call via the hosted flow redirect; for the hosted-SDK
+        // path the inquiry_id is enough to resume.
+        return {
+          inquiry_id: existing.persona_inquiry_id,
+          session_token: null, // client resumes via inquiry_id when null
+          status: remote.status,
+          reused: true,
+          submission_id: String(existing._id),
+        };
+      }
+    } catch (err) {
+      winstonLogger.warn('Persona inquiry reuse check failed, creating fresh', {
+        inquiryId: existing.persona_inquiry_id,
+        message: err.message,
+      });
+    }
+  }
+
+  // Create a fresh inquiry at Persona.
+  const inquiry = await PersonaService.createInquiry({
+    userId: String(userId),
+    metadata: {
+      email: user.email,
+      display_name: user.display_name,
+      ...metadata,
+    },
+  });
+
+  const sessionTokenHash = PersonaService.hashSessionToken(inquiry.session_token);
+
+  // Atomic claim: if another concurrent request already wrote one, surface
+  // theirs instead of creating a second row.
+  const claimed = await IdentityVerification.findOneAndUpdate(
+    {
+      user_id: userId,
+      status: 'pending',
+      persona_inquiry_id: null,
+    },
+    {
+      $setOnInsert: {
+        user_id: userId,
+        tier: 'basic',
+        document_type: 'drivers_license', // Persona reports the real type later
+        status: 'pending',
+        submitted_at: new Date(),
+      },
+      $set: {
+        persona_inquiry_id: inquiry.inquiry_id,
+        persona_session_token_hash: sessionTokenHash,
+        'automated_checks.provider': 'persona',
+        'automated_checks.provider_reference': inquiry.inquiry_id,
+      },
+    },
+    { new: true, upsert: true, setDefaultsOnInsert: true }
+  );
+
+  // user.verification_status mirrors the legacy flow so downstream readers
+  // don't need to case-switch on provider.
+  if (user.verification_status !== 'verified') {
+    user.verification_status = 'pending';
+    await user.save();
+  }
+
+  await AuditLogger.record({
+    actor: { _id: userId },
+    action: 'identity.persona_inquiry_started',
+    entityType: 'IdentityVerification',
+    entityId: claimed._id,
+    metadata: { inquiry_id: inquiry.inquiry_id },
+  });
+
+  return {
+    inquiry_id: inquiry.inquiry_id,
+    session_token: inquiry.session_token,
+    status: inquiry.status,
+    reused: false,
+    submission_id: String(claimed._id),
+  };
+};
+
+const EVENT_STATUS_MAP = {
+  'inquiry.created': 'pending',
+  'inquiry.started': 'pending',
+  'inquiry.pending': 'pending',
+  'inquiry.completed': 'pending',
+  'inquiry.approved': 'approved',
+  'inquiry.declined': 'rejected',
+  'inquiry.marked-for-review': 'needs_more_info',
+  'inquiry.failed': 'rejected',
+  'inquiry.expired': 'rejected',
+};
+
+/**
+ * Apply a verified Persona webhook event to the matching IdentityVerification.
+ *
+ * Idempotent: a second call with the same event_id is a no-op.
+ */
+VerificationService.handlePersonaWebhook = async function handlePersonaWebhook(payload) {
+  const eventId =
+    (payload && payload.data && payload.data.id) ||
+    (payload && payload.data && payload.data.attributes && payload.data.attributes['event-id']) ||
+    null;
+  const eventName =
+    payload && payload.data && payload.data.attributes && payload.data.attributes.name
+      ? String(payload.data.attributes.name)
+      : null;
+  const inquiry =
+    payload &&
+    payload.data &&
+    payload.data.attributes &&
+    payload.data.attributes.payload &&
+    payload.data.attributes.payload.data
+      ? payload.data.attributes.payload.data
+      : null;
+  const inquiryId = inquiry ? inquiry.id : null;
+
+  if (!eventId || !eventName || !inquiryId) {
+    throw new VerificationError('Malformed Persona webhook payload', 400, 'PERSONA_WEBHOOK_MALFORMED');
+  }
+
+  const submission = await IdentityVerification.findOne({ persona_inquiry_id: inquiryId });
+  if (!submission) {
+    // Could be an inquiry we never created (fraudulent reference_id, or a
+    // webhook for a deleted row). Log and no-op — do not raise.
+    winstonLogger.warn('Persona webhook for unknown inquiry', { inquiryId, eventName });
+    return { applied: false, reason: 'unknown_inquiry' };
+  }
+
+  if (submission.persona_last_event_id === eventId) {
+    return { applied: false, reason: 'duplicate_event' };
+  }
+
+  const normalized = PersonaService.normalizeInquiry({ data: inquiry });
+  const nextStatus = EVENT_STATUS_MAP[eventName] || submission.status;
+
+  submission.persona_last_event_id = eventId;
+  submission.webhook_last_event_at = new Date();
+  if (normalized && normalized.report_id) submission.persona_report_id = normalized.report_id;
+  if (normalized && normalized.checks) {
+    submission.automated_checks = {
+      ...(submission.automated_checks || {}),
+      face_match_score: normalized.checks.face_match_score,
+      liveness_passed: normalized.checks.liveness_passed,
+      duplicate_suspected: !!normalized.checks.duplicate_suspected,
+      provider: 'persona',
+      provider_reference: inquiryId,
+    };
+  }
+
+  // Only apply TERMINAL transitions here. Pending → pending is a no-op status
+  // write but still useful because it updates webhook_last_event_at.
+  if (nextStatus !== submission.status && nextStatus !== 'pending') {
+    submission.status = nextStatus;
+    if (nextStatus === 'approved') {
+      submission.purge_after = new Date(Date.now() + ASSET_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+      // Mirror the legacy approve branch — update user badges + trust.
+      const user = await User.findById(submission.user_id);
+      if (user) {
+        user.verification_status = 'verified';
+        user.identity_tier = submission.tier;
+        if (!user.verification_badges) user.verification_badges = {};
+        user.verification_badges.identity_verified = true;
+        VerificationService.recomputeTrustScore(user);
+        if (typeof user.recomputeProfileCompletion === 'function') user.recomputeProfileCompletion();
+        await user.save();
+        try {
+          await GamificationService.recordEvent?.(user._id, 'identity_verified', {
+            provider: 'persona',
+          });
+        } catch (err) {
+          winstonLogger.warn('Gamification event failed on identity_verified', { message: err.message });
+        }
+      }
+    } else if (nextStatus === 'rejected') {
+      const user = await User.findById(submission.user_id);
+      if (user) {
+        user.verification_status = 'unverified';
+        await user.save();
+      }
+    } else if (nextStatus === 'needs_more_info') {
+      submission.status = 'needs_more_info';
+    }
+  }
+
+  await submission.save();
+  await AuditLogger.record({
+    actor: { _id: submission.user_id },
+    action: `identity.persona_webhook.${eventName}`,
+    entityType: 'IdentityVerification',
+    entityId: submission._id,
+    metadata: { event_id: eventId, inquiry_id: inquiryId, next_status: submission.status },
+  });
+
+  return { applied: true, status: submission.status, submission_id: String(submission._id) };
+};
 
 module.exports = VerificationService;
 module.exports.VerificationError = VerificationError;

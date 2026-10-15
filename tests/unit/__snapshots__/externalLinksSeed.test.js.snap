@@ -1,0 +1,16 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`external_links seed — program entries snapshot — shape frozen for the footer renderer 1`] = `
+[
+  {
+    "kind": "justice_lifts",
+    "label": "Justice Lifts",
+    "url": "https://justicelifts.com",
+  },
+  {
+    "kind": "battle_buddies",
+    "label": "Battle Buddies for Vets",
+    "url": "https://battlebuddiesforvets.com",
+  },
+]
+`;

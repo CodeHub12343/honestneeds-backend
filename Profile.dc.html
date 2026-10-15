@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Veteran Groups</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=DM+Sans:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&display=swap">
+<style>
+body{margin:0;font-family:'DM Sans',system-ui,sans-serif;color:#0B1220;background:#F5F2EB}
+*{box-sizing:border-box}
+a{color:#1D3156;text-decoration:none}
+h1,h2,h3{font-family:'Archivo',sans-serif;margin:0;letter-spacing:-0.01em}
+.serif{font-family:'Instrument Serif',Georgia,serif}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:12px 20px;border-radius:4px;font-weight:700;font-size:13px;font-family:'Archivo',sans-serif;letter-spacing:0.03em;text-transform:uppercase;border:none;cursor:pointer}
+.btn-primary{background:#B01E2E;color:#fff}
+.btn-nav{background:#0B1A33;color:#F5F2EB}
+.btn-ghost{background:transparent;color:#0B1A33;border:1.5px solid rgba(11,26,51,0.2)}
+.chip{display:inline-flex;align-items:center;gap:5px;padding:5px 11px;border-radius:999px;font-size:12px;font-weight:600;background:rgba(29,49,86,0.08);color:#1D3156}
+.card{background:#FDFCF9;border-radius:10px;border:1px solid rgba(11,26,51,0.08)}
+.container{max-width:1240px;margin:0 auto;padding-inline:40px}
+.flag-rule{height:4px;background:linear-gradient(to right,#0B1A33 0 33.3%,#F5F2EB 33.3% 66.6%,#B01E2E 66.6% 100%)}
+.pill{padding:8px 14px;border-radius:999px;font-size:12px;font-weight:600;background:#FDFCF9;color:#4A5A72;border:1px solid rgba(11,26,51,0.12);cursor:pointer}
+.pill.on{background:#0B1A33;color:#F5F2EB;border-color:#0B1A33}
+.crisis-pill{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;background:rgba(200,16,46,0.08);color:#8B0C1F;font-weight:700;font-size:12px;border:1px solid rgba(200,16,46,0.3);font-family:'Archivo',sans-serif;letter-spacing:0.03em;text-transform:uppercase}
+</style>
+</helmet>
+
+<div style="width:100%;min-height:1500px;background:#F5F2EB;display:flex;flex-direction:column">
+
+<!-- Util bar -->
+<div style="background:#0B1A33;color:#F5F2EB;font-size:12px">
+  <div class="container" style="display:flex;align-items:center;justify-content:space-between;padding-block:9px">
+    <span style="opacity:0.75">A Veteran Connection Program by HonestNeed</span>
+    <a href="Crisis.dc.html" style="color:#F5F2EB;display:inline-flex;align-items:center;gap:6px;font-weight:600"><span style="width:7px;height:7px;border-radius:50%;background:#C8102E"></span>Veterans Crisis Line · 988 + 1</a>
+  </div>
+</div>
+
+<!-- Nav -->
+<nav style="background:#FDFCF9;border-bottom:1px solid rgba(11,26,51,0.08)">
+  <div class="container" style="display:flex;align-items:center;justify-content:space-between;padding-block:14px;gap:40px">
+    <a href="Main.dc.html" style="display:flex;align-items:center;gap:12px">
+      <img src="/_blob/b5a1e71277ac66329f9f33c95ebc95a5" alt="" style="width:48px;height:48px;object-fit:contain">
+      <div style="line-height:1.1">
+        <strong style="font-family:'Archivo',sans-serif;font-weight:800;font-size:15px;color:#0B1A33;letter-spacing:0.02em;display:block">BATTLE BUDDIES</strong>
+        <span style="font-family:'Archivo',sans-serif;font-weight:600;font-size:10px;color:#B01E2E;letter-spacing:0.18em">FOR VETS™</span>
+      </div>
+    </a>
+    <div style="display:flex;align-items:center;gap:28px;font-weight:500;font-size:14px">
+      <a href="BattleBuddies.dc.html">Find a Buddy</a>
+      <a href="Groups.dc.html" style="color:#B01E2E;font-weight:700">Groups</a>
+      <a href="#">Activities</a>
+      <a href="#">Resources</a>
+      <a href="GetHelp.dc.html">Get Help</a>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <a href="Crisis.dc.html" class="crisis-pill"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#8B0C1F" stroke-width="2.5"><path d="M12 2 L2 20 h20 Z"/></svg>Crisis Help</a>
+      <div style="width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#425571,#1D3156)"></div>
+    </div>
+  </div>
+  <div class="flag-rule"></div>
+</nav>
+
+<!-- Page hero -->
+<section style="background:#FDFCF9;padding-block:40px;border-bottom:1px solid rgba(11,26,51,0.08)">
+  <div class="container" style="display:grid;grid-template-columns:1.3fr 1fr;gap:40px;align-items:center">
+    <div>
+      <div style="font-size:12px;color:#4A5A72;margin-bottom:10px"><a href="Main.dc.html">Veterans</a> · <span style="color:#0B1A33">Groups</span></div>
+      <h1 style="font-size:44px;font-weight:800;color:#0B1A33;line-height:1.05">A room where you still belong.</h1>
+      <p style="font-size:16px;color:#4A5A72;margin:12px 0 0;max-width:620px">Join groups built around branch, era, interests, recovery, faith, or your city. Some meet in person. Some meet online. All are led by vetted peers.</p>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <button class="btn btn-primary" style="justify-content:space-between;padding:16px 20px;font-size:14px">Create a group <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+      <button class="btn btn-ghost" style="justify-content:space-between;padding:14px 20px;font-size:13px">My groups (4) <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg></button>
+    </div>
+  </div>
+</section>
+
+<!-- Filters strip -->
+<section style="padding-block:20px;background:#F5F2EB;border-bottom:1px solid rgba(11,26,51,0.06)">
+  <div class="container" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+    <div style="position:relative;flex:1;min-width:260px;max-width:420px">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4A5A72" stroke-width="2" style="position:absolute;left:14px;top:50%;transform:translateY(-50%)"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input placeholder="Search groups — e.g. 'OIF women' or 'Columbus trades'" style="width:100%;padding:12px 14px 12px 40px;border:1.5px solid rgba(11,26,51,0.12);border-radius:999px;background:#FDFCF9;font-size:14px;font-family:inherit">
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      <span class="pill on">All</span>
+      <span class="pill">Near me</span>
+      <span class="pill">Virtual</span>
+      <span class="pill">Branch</span>
+      <span class="pill">Era</span>
+      <span class="pill">Peer-led circles</span>
+      <span class="pill">Faith</span>
+      <span class="pill">Recovery</span>
+      <span class="pill">Hobbies</span>
+    </div>
+  </div>
+</section>
+
+<!-- Featured group -->
+<section style="padding-block:28px">
+  <div class="container">
+    <div class="card" style="padding:0;overflow:hidden;display:grid;grid-template-columns:1.2fr 1fr">
+      <div style="background:linear-gradient(135deg,#0B1A33 0%,#1D3156 100%);color:#F5F2EB;padding:36px 40px;display:flex;flex-direction:column;gap:14px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-family:'Archivo',sans-serif;font-size:11px;font-weight:800;letter-spacing:0.2em;text-transform:uppercase;color:#C9A646">Featured this week</span>
+        </div>
+        <h2 style="font-size:32px;line-height:1.1;font-weight:800;color:#F5F2EB">The Quiet Hour — Peer Circle for Vets Who Can't Sleep</h2>
+        <p style="font-size:14px;line-height:1.6;color:rgba(245,242,235,0.8);margin:0">A trained-peer-led video circle every Tue + Thu at 11pm ET. Camera optional. Voice welcome. Silence okay. 47 regulars, open to new vets any week.</p>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">
+          <span style="font-size:11px;background:rgba(201,166,70,0.2);color:#C9A646;padding:4px 10px;border-radius:4px;font-weight:600">Peer-led</span>
+          <span style="font-size:11px;background:rgba(245,242,235,0.1);color:#F5F2EB;padding:4px 10px;border-radius:4px;font-weight:600">Virtual</span>
+          <span style="font-size:11px;background:rgba(245,242,235,0.1);color:#F5F2EB;padding:4px 10px;border-radius:4px;font-weight:600">Weekly</span>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:8px">
+          <button class="btn btn-primary">Join the circle</button>
+          <button class="btn" style="background:transparent;color:#F5F2EB;border:1.5px solid rgba(245,242,235,0.4)">Learn more</button>
+        </div>
+      </div>
+      <div style="background:#E3DACC;display:flex;align-items:center;justify-content:center;padding:40px">
+        <div style="display:flex;flex-direction:column;gap:12px;width:100%">
+          <div style="background:#FDFCF9;border-radius:8px;padding:16px;display:flex;align-items:center;gap:12px">
+            <div style="width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#788C5D,#2E5020)"></div>
+            <div><strong style="font-size:13px;color:#0B1A33;display:block">Facilitator: Rosa M.</strong><span style="font-size:11px;color:#4A5A72">USMC '01–'11 · Peer Mentor</span></div>
+          </div>
+          <div style="background:#FDFCF9;border-radius:8px;padding:16px">
+            <strong style="font-size:12px;color:#4A5A72;letter-spacing:0.1em;text-transform:uppercase;font-family:'Archivo',sans-serif;display:block;margin-bottom:8px">Next session</strong>
+            <strong style="font-size:18px;color:#0B1A33;display:block">Thu Oct 10 · 11:00 PM ET</strong>
+            <span style="font-size:12px;color:#4A5A72">47 regulars · 12 new this month</span>
+          </div>
+          <div style="background:#FDFCF9;border-radius:8px;padding:12px 16px;display:flex;align-items:center;justify-content:space-between">
+            <span style="font-size:12px;color:#4A5A72">Member satisfaction</span>
+            <div style="display:flex;align-items:center;gap:6px"><strong style="font-size:14px;color:#0B1A33">4.9</strong><div style="display:flex;gap:2px"><svg width="12" height="12" viewBox="0 0 24 24" fill="#C9A646"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26"/></svg><svg width="12" height="12" viewBox="0 0 24 24" fill="#C9A646"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26"/></svg><svg width="12" height="12" viewBox="0 0 24 24" fill="#C9A646"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26"/></svg><svg width="12" height="12" viewBox="0 0 24 24" fill="#C9A646"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26"/></svg><svg width="12" height="12" viewBox="0 0 24 24" fill="#C9A646"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26"/></svg></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Grid of groups -->
+<section style="padding-block:16px 56px">
+  <div class="container">
+    <h2 style="font-size:20px;font-weight:800;color:#0B1A33;margin-bottom:14px">All groups · <span style="color:#4A5A72;font-weight:500">184 near you + virtual</span></h2>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px">
+
+      <article class="card" style="padding:22px;display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="width:52px;height:52px;border-radius:10px;background:linear-gradient(135deg,#425571,#1D3156);color:#C9A646;display:flex;align-items:center;justify-content:center;font-family:'Archivo',sans-serif;font-weight:900;font-size:20px">A</div>
+          <div><strong style="font-size:15px;color:#0B1A33;display:block">Army Infantry — Midwest</strong><span style="font-size:12px;color:#4A5A72">Monthly meetup · Columbus, OH</span></div>
+        </div>
+        <p style="font-size:13px;color:#0B1220;margin:0;line-height:1.55">Open to anyone who wore the crossed rifles. We eat too much, laugh at bad jokes, show up for one another.</p>
+        <div style="display:flex;gap:4px;flex-wrap:wrap"><span class="chip">In-person</span><span class="chip">All eras</span></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;padding-top:8px;border-top:1px solid rgba(11,26,51,0.06)">
+          <span style="font-size:12px;color:#4A5A72"><strong style="color:#0B1A33">[142]</strong> members</span>
+          <button class="btn" style="background:#0B1A33;color:#F5F2EB;padding:8px 14px;font-size:11px">Join</button>
+        </div>
+      </article>
+
+      <article class="card" style="padding:22px;display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="width:52px;height:52px;border-radius:10px;background:linear-gradient(135deg,#8B1522,#B01E2E);color:#F5F2EB;display:flex;align-items:center;justify-content:center;font-family:'Archivo',sans-serif;font-weight:900;font-size:20px">USMC</div>
+          <div><strong style="font-size:15px;color:#0B1A33;display:block">Women of the Corps</strong><span style="font-size:12px;color:#4A5A72">Weekly · Virtual + Dayton</span></div>
+        </div>
+        <p style="font-size:13px;color:#0B1220;margin:0;line-height:1.55">For women who served in the Marine Corps. Peer-led, closed group. Request to join; a facilitator reaches out.</p>
+        <div style="display:flex;gap:4px;flex-wrap:wrap"><span class="chip">Peer-led</span><span class="chip">Women vets</span></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;padding-top:8px;border-top:1px solid rgba(11,26,51,0.06)">
+          <span style="font-size:12px;color:#4A5A72"><strong style="color:#0B1A33">[89]</strong> members · Private</span>
+          <button class="btn" style="background:#0B1A33;color:#F5F2EB;padding:8px 14px;font-size:11px">Request</button>
+        </div>
+      </article>
+
+      <article class="card" style="padding:22px;display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="width:52px;height:52px;border-radius:10px;background:linear-gradient(135deg,#2E5020,#558A42);color:#F5F2EB;display:flex;align-items:center;justify-content:center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></div>
+          <div><strong style="font-size:15px;color:#0B1A33;display:block">Dawn Patrol — 5:30am PT</strong><span style="font-size:12px;color:#4A5A72">Daily · San Diego trails</span></div>
+        </div>
+        <p style="font-size:13px;color:#0B1220;margin:0;line-height:1.55">Early-morning hike/run. Coffee after. No performance pressure, no leaving anyone on the trail.</p>
+        <div style="display:flex;gap:4px;flex-wrap:wrap"><span class="chip">Fitness</span><span class="chip">Early risers</span></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;padding-top:8px;border-top:1px solid rgba(11,26,51,0.06)">
+          <span style="font-size:12px;color:#4A5A72"><strong style="color:#0B1A33">[31]</strong> members</span>
+          <button class="btn" style="background:#0B1A33;color:#F5F2EB;padding:8px 14px;font-size:11px">Join</button>
+        </div>
+      </article>
+
+      <article class="card" style="padding:22px;display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="width:52px;height:52px;border-radius:10px;background:linear-gradient(135deg,#C9A646,#8B6914);color:#0B1A33;display:flex;align-items:center;justify-content:center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></div>
+          <div><strong style="font-size:15px;color:#0B1A33;display:block">In Recovery, Still Serving</strong><span style="font-size:12px;color:#4A5A72">Weekly · Virtual · Mon 7pm ET</span></div>
+        </div>
+        <p style="font-size:13px;color:#0B1220;margin:0;line-height:1.55">For vets in recovery from substance use. Open to any program. Peer-led, confidential, no cross-talk.</p>
+        <div style="display:flex;gap:4px;flex-wrap:wrap"><span class="chip">Recovery</span><span class="chip">Confidential</span></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;padding-top:8px;border-top:1px solid rgba(11,26,51,0.06)">
+          <span style="font-size:12px;color:#4A5A72"><strong style="color:#0B1A33">[67]</strong> members · Private</span>
+          <button class="btn" style="background:#0B1A33;color:#F5F2EB;padding:8px 14px;font-size:11px">Request</button>
+        </div>
+      </article>
+
+      <article class="card" style="padding:22px;display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="width:52px;height:52px;border-radius:10px;background:linear-gradient(135deg,#1D3156,#07101F);color:#F5F2EB;display:flex;align-items:center;justify-content:center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></div>
+          <div><strong style="font-size:15px;color:#0B1A33;display:block">Faith at the Firepit</strong><span style="font-size:12px;color:#4A5A72">Monthly · Nashville, TN</span></div>
+        </div>
+        <p style="font-size:13px;color:#0B1220;margin:0;line-height:1.55">Christian vet fellowship, open to all. Firepit, chairs, coffee, honest conversation. All chaplains welcome.</p>
+        <div style="display:flex;gap:4px;flex-wrap:wrap"><span class="chip">Faith</span><span class="chip">In-person</span></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;padding-top:8px;border-top:1px solid rgba(11,26,51,0.06)">
+          <span style="font-size:12px;color:#4A5A72"><strong style="color:#0B1A33">[54]</strong> members</span>
+          <button class="btn" style="background:#0B1A33;color:#F5F2EB;padding:8px 14px;font-size:11px">Join</button>
+        </div>
+      </article>
+
+      <article class="card" style="padding:22px;display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="width:52px;height:52px;border-radius:10px;background:linear-gradient(135deg,#788C5D,#558A42);color:#F5F2EB;display:flex;align-items:center;justify-content:center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2a7 7 0 0 1 7 7c0 5-7 13-7 13s-7-8-7-13a7 7 0 0 1 7-7z"/><circle cx="12" cy="9" r="2.5"/></svg></div>
+          <div><strong style="font-size:15px;color:#0B1A33;display:block">Transition Trail Guides</strong><span style="font-size:12px;color:#4A5A72">Mentorship · Rolling admit</span></div>
+        </div>
+        <p style="font-size:13px;color:#0B1220;margin:0;line-height:1.55">Mentors who've navigated discharge, school, VA claims, career pivots. You get paired with one for 90 days.</p>
+        <div style="display:flex;gap:4px;flex-wrap:wrap"><span class="chip">Mentorship</span><span class="chip">90 days</span></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;padding-top:8px;border-top:1px solid rgba(11,26,51,0.06)">
+          <span style="font-size:12px;color:#4A5A72"><strong style="color:#0B1A33">[118]</strong> mentors</span>
+          <button class="btn" style="background:#0B1A33;color:#F5F2EB;padding:8px 14px;font-size:11px">Get paired</button>
+        </div>
+      </article>
+    </div>
+
+    <div style="display:flex;justify-content:center;padding-top:28px">
+      <button class="btn btn-ghost">See all 184 groups</button>
+    </div>
+  </div>
+</section>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1500}}'>
+class Component extends DCLogic { renderVals(){return{};} }
+</script>
+</body>
+</html>

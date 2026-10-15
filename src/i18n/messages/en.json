@@ -1,0 +1,34 @@
+{
+  "common": {
+    "ok": "OK",
+    "cancel": "Cancel",
+    "save": "Save",
+    "retry": "Retry",
+    "something_went_wrong": "Something went wrong. Please try again."
+  },
+  "validation": {
+    "email_required": "An email address is required.",
+    "email_invalid": "That doesn't look like a valid email address.",
+    "password_required": "A password is required.",
+    "password_too_weak": "Password must be at least 8 characters and include a letter and a number.",
+    "field_required": "This field is required.",
+    "value_too_short": "This value is too short.",
+    "value_too_long": "This value is too long.",
+    "locale_unsupported": "That language is not supported yet."
+  },
+  "auth": {
+    "login_failed": "Email or password is incorrect.",
+    "session_expired": "Your session has expired. Please sign in again.",
+    "logged_out": "You have been signed out."
+  },
+  "campaigns": {
+    "created": "Your campaign is ready.",
+    "updated": "Campaign updated.",
+    "count": "{count, plural, one {# campaign} other {# campaigns}}",
+    "progress": "{raised} raised of {goal}"
+  },
+  "upgrade": {
+    "requires_payout_method": "You need a payout method on file before activating paid sharing.",
+    "already_a_share_campaign": "This campaign is already a Share Campaign."
+  }
+}

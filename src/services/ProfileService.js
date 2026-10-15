@@ -103,6 +103,41 @@ class ProfileService {
       }
     }
 
+    // Phase 4 — social + custom links.
+    // Guards: https-only, bounded length, caps on list size. Validation lives
+    // here (not on the schema) so a model save from an admin tool can bypass
+    // user-facing limits if needed, while this user-facing route stays strict.
+    if (Array.isArray(body.social_links)) {
+      const validPlatforms = new Set(['facebook', 'instagram', 'twitter', 'x', 'linkedin', 'tiktok', 'youtube', 'twitch', 'threads']);
+      const cleaned = [];
+      for (const entry of body.social_links.slice(0, 10)) {
+        if (!entry || !validPlatforms.has(entry.platform)) continue;
+        const url = typeof entry.url === 'string' ? entry.url.trim() : '';
+        if (!/^https:\/\/[^\s]{3,200}$/.test(url)) continue;
+        cleaned.push({ platform: entry.platform, url });
+      }
+      user.social_links = cleaned;
+    }
+    if (Array.isArray(body.other_links)) {
+      const cleaned = [];
+      for (const entry of body.other_links.slice(0, 5)) {
+        if (!entry) continue;
+        const label = typeof entry.label === 'string' ? entry.label.trim().slice(0, 40) : '';
+        const url = typeof entry.url === 'string' ? entry.url.trim() : '';
+        if (!label) continue;
+        if (!/^https:\/\/[^\s]{3,200}$/.test(url)) continue;
+        cleaned.push({ label, url });
+      }
+      user.other_links = cleaned;
+    }
+    if (body.primary_social_platform !== undefined) {
+      const next = body.primary_social_platform;
+      const allowed = [null, 'facebook', 'instagram', 'twitter', 'x', 'linkedin', 'tiktok', 'youtube', 'twitch', 'threads', 'other'];
+      if (next === null || next === '' || allowed.includes(next)) {
+        user.primary_social_platform = next === '' ? null : next;
+      }
+    }
+
     // Privacy controls
     if (body.privacy && typeof body.privacy === 'object') {
       const p = body.privacy;

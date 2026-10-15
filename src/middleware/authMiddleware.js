@@ -8,6 +8,8 @@
 
 const { verifyToken, extractTokenFromHeader } = require('../utils/jwt');
 const { logger } = require('../utils/logger');
+const { resolveLocale } = require('./localeResolver');
+const { LOCALE_COOKIE } = require('../config/i18n');
 
 /**
  * Authentication middleware
@@ -97,7 +99,19 @@ const authMiddleware = (req, res, next) => {
       type: decoded.type,
       iat: decoded.iat,
       exp: decoded.exp,
+      // Optional — present only on tokens issued after the i18n rollout. Older
+      // tokens omit it; the resolver below falls back to cookie/header.
+      locale: decoded.locale,
     };
+
+    // Re-resolve locale now that req.user exists so authed routes see the
+    // user's stored preference. For legacy tokens without decoded.locale this
+    // is identical to the global resolver's result.
+    req.locale = resolveLocale({
+      userLocale: req.user.locale,
+      cookieLocale: req.cookies ? req.cookies[LOCALE_COOKIE] : null,
+      acceptLanguage: req.headers ? req.headers['accept-language'] : null,
+    });
 
     logger.info('📌 Auth Middleware: User context attached to request', {
       'req.user._id': req.user._id,

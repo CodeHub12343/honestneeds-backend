@@ -120,6 +120,56 @@ router.post('/finance/transactions/:transactionId/refund', requirePermission(PER
 router.get('/finance/reports', requirePermission(PERMISSIONS.FINANCE_REPORTS), FinanceController.getPeriodReport);
 router.get('/finance/reconcile', requirePermission(PERMISSIONS.FINANCE_REPORTS), FinanceController.reconcile);
 
+// ── Phase 6 Promo wallet (TASK-6.2) — finance role only ─────────────────
+const PromoWalletController = require('../../controllers/admin/PromoWalletController');
+router.get('/promo-wallet', requirePermission(PERMISSIONS.FINANCE_VIEW), PromoWalletController.get);
+router.post('/promo-wallet/credit', requirePermission(PERMISSIONS.FINANCE_ACT), PromoWalletController.credit);
+
+// Sponsorship Pool portal — admin grant.
+// Reads the same pool as /promo-wallet; this just drains it for an upgrade.
+const UpgradePortalController = require('../../controllers/UpgradePortalController');
+router.post(
+  '/upgrade-portal/grant',
+  requirePermission(PERMISSIONS.FINANCE_ACT),
+  UpgradePortalController.adminGrant
+);
+
+// Feature spotlights — editorial content gated behind marketing role.
+const FeatureSpotlightController = require('../../controllers/FeatureSpotlightController');
+router.get(
+  '/feature-spotlights',
+  requirePermission(PERMISSIONS.MARKETING_VIEW),
+  FeatureSpotlightController.adminList
+);
+router.put(
+  '/feature-spotlights/:key',
+  requirePermission(PERMISSIONS.MARKETING_SEND),
+  FeatureSpotlightController.adminUpsert
+);
+router.post(
+  '/feature-spotlights/:key/retire',
+  requirePermission(PERMISSIONS.MARKETING_SEND),
+  FeatureSpotlightController.adminRetire
+);
+
+// ── Phase 9 Email marketing (TASK-9.2) — marketing role or super_admin ──
+const MarketingController = require('../../controllers/admin/MarketingController');
+router.get('/marketing/lists', requirePermission(PERMISSIONS.MARKETING_VIEW), MarketingController.listSegments);
+router.post('/marketing/contacts', requirePermission(PERMISSIONS.MARKETING_SEND), MarketingController.addContact);
+router.delete('/marketing/contacts', requirePermission(PERMISSIONS.MARKETING_SEND), MarketingController.removeContact);
+router.post('/marketing/unsubscribe', requirePermission(PERMISSIONS.MARKETING_SEND), MarketingController.unsubscribe);
+router.post('/marketing/campaigns', requirePermission(PERMISSIONS.MARKETING_SEND), MarketingController.send);
+
+// ── Phase 9 Support queue (TASK-9.4) — support role ─────────────────────
+const SupportController = require('../../controllers/SupportController');
+router.get('/support/tickets', requirePermission(PERMISSIONS.SUPPORT_VIEW), SupportController.staffList);
+router.get('/support/tickets/:id', requirePermission(PERMISSIONS.SUPPORT_VIEW), SupportController.staffGet);
+router.post('/support/tickets/:id/messages', requirePermission(PERMISSIONS.SUPPORT_ACT), SupportController.staffReply);
+router.post('/support/tickets/:id/assign', requirePermission(PERMISSIONS.SUPPORT_ACT), SupportController.staffAssign);
+router.post('/support/tickets/:id/resolve', requirePermission(PERMISSIONS.SUPPORT_ACT), SupportController.staffResolve);
+router.post('/support/tickets/:id/close', requirePermission(PERMISSIONS.SUPPORT_ACT), SupportController.staffClose);
+router.post('/support/tickets/:id/draft-reply', requirePermission(PERMISSIONS.SUPPORT_ACT), SupportController.staffDraftReply);
+
 // ── AD-05 ID+ verification queue ────────────────────────────────────────
 router.get('/verifications', requirePermission(PERMISSIONS.VERIFICATION_VIEW), VerificationController.getQueue);
 router.get('/verifications/:submissionId', requirePermission(PERMISSIONS.VERIFICATION_VIEW), VerificationController.getSubmission);
@@ -154,5 +204,8 @@ router.get('/ai/features', requirePermission(PERMISSIONS.AI_VIEW), AIAdminContro
 router.get('/audit', requirePermission(PERMISSIONS.AUDIT_VIEW), AuditController.query);
 router.get('/audit/statistics', requirePermission(PERMISSIONS.AUDIT_VIEW), AuditController.getStatistics);
 router.get('/audit/entity/:entityType/:entityId', requirePermission(PERMISSIONS.AUDIT_VIEW), AuditController.getEntityTrail);
+
+// ── Phase 0: Feature flags (scoped admin UI, separate from legacy /config/feature-flags)
+router.use('/feature-flags', require('./featureFlagRoutes'));
 
 module.exports = router;

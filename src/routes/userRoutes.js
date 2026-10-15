@@ -34,6 +34,7 @@ const avatarUploadMiddleware = createUploadMiddleware({
 // Authenticated profile dashboard + setup/editing
 router.get('/me/profile', authMiddleware, profileController.getMyDashboard);
 router.patch('/me/profile', authMiddleware, profileController.updateMyProfile);
+router.put('/me/locale', authMiddleware, profileController.updateMyLocale);
 router.get('/me/profile/completion', authMiddleware, profileController.getMyCompletion);
 router.get('/me/profile/strength', authMiddleware, profileController.getMyStrength);
 router.get('/me/gamification', authMiddleware, profileController.getMyGamification);

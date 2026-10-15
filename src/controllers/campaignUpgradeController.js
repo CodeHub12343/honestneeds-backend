@@ -9,6 +9,7 @@
  */
 
 const CampaignUpgradeService = require('../services/CampaignUpgradeService');
+const UpgradeRequestService = require('../services/UpgradeRequestService');
 const winstonLogger = require('../utils/winstonLogger');
 
 /**
@@ -228,5 +229,79 @@ class CampaignUpgradeController {
     }
   }
 }
+
+// ── Phase 3: owner-initiated upgrade-request controller methods ──────────
+// These are mounted alongside the existing sponsor-flow controller methods.
+// They surface the OwnerAsksCommunity flow — the reverse direction of the
+// sponsor flow — through its own set of routes under /campaigns/upgrade-requests.
+Object.assign(CampaignUpgradeController, {
+  async createOwnerRequest(req, res) {
+    try {
+      const doc = await UpgradeRequestService.createRequest({
+        campaignIdOrRef: req.params.id,
+        ownerId: req.user.userId,
+        message: req.body && req.body.message ? String(req.body.message) : null,
+        req,
+      });
+      return res.status(201).json({ success: true, data: doc });
+    } catch (error) {
+      return fail(res, error, 'createOwnerRequest');
+    }
+  },
+
+  async listCommunityRequests(req, res) {
+    try {
+      const page = parseInt(req.query.page, 10) || 1;
+      const limit = parseInt(req.query.limit, 10) || 25;
+      const campaignId = req.query.campaign_id || null;
+      let isVeteran = null;
+      if (req.query.is_veteran === 'true') isVeteran = true;
+      else if (req.query.is_veteran === 'false') isVeteran = false;
+      const data = await UpgradeRequestService.listCommunity({ page, limit, campaignId, isVeteran });
+      return res.status(200).json({ success: true, ...data });
+    } catch (error) {
+      return fail(res, error, 'listCommunityRequests');
+    }
+  },
+
+  async listMyOwnerRequests(req, res) {
+    try {
+      const page = parseInt(req.query.page, 10) || 1;
+      const limit = parseInt(req.query.limit, 10) || 25;
+      const data = await UpgradeRequestService.listMine({ ownerId: req.user.userId, page, limit });
+      return res.status(200).json({ success: true, ...data });
+    } catch (error) {
+      return fail(res, error, 'listMyOwnerRequests');
+    }
+  },
+
+  async cancelOwnerRequest(req, res) {
+    try {
+      const doc = await UpgradeRequestService.cancelRequest({
+        requestId: req.params.requestId,
+        ownerId: req.user.userId,
+        reason: req.body && req.body.reason ? String(req.body.reason) : null,
+        req,
+      });
+      return res.status(200).json({ success: true, data: doc });
+    } catch (error) {
+      return fail(res, error, 'cancelOwnerRequest');
+    }
+  },
+
+  async fulfilOwnerRequest(req, res) {
+    try {
+      const result = await UpgradeRequestService.fulfilRequest({
+        requestId: req.params.requestId,
+        sponsorId: req.user.userId,
+        shareConfig: (req.body && req.body.share_config) || {},
+        req,
+      });
+      return res.status(201).json({ success: true, data: result });
+    } catch (error) {
+      return fail(res, error, 'fulfilOwnerRequest');
+    }
+  },
+});
 
 module.exports = CampaignUpgradeController;

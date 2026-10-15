@@ -8,6 +8,7 @@
 
 const express = require('express');
 const verificationController = require('../controllers/VerificationController');
+const personaController = require('../controllers/PersonaController');
 const { authMiddleware, requireAdmin } = require('../middleware/authMiddleware');
 const { createUploadMiddleware } = require('../middleware/uploadMiddleware');
 
@@ -30,10 +31,15 @@ router.post('/email/confirm', authMiddleware, verificationController.confirmEmai
 router.post('/identity/upload', authMiddleware, identityUpload, verificationController.uploadIdentityAsset);
 router.post('/identity', authMiddleware, verificationController.submitIdentity);
 
+// Persona-hosted identity flow (Phase 2 — behind feature flag persona_identity_v1).
+router.post('/persona/start', authMiddleware, personaController.start);
+router.get('/persona/me', authMiddleware, personaController.getMine);
+
 // ── Staff / Admin endpoints ───────────────────────────────────────────
 // requireAdmin is [authenticate, authorize(['admin'])]
 router.get('/admin/queue', requireAdmin, verificationController.listQueue);
 router.post('/admin/:submissionId/review', requireAdmin, verificationController.reviewIdentity);
+router.get('/admin/:submissionId/persona-report', requireAdmin, verificationController.getPersonaReportLink);
 router.post('/admin/:userId/org-badge', requireAdmin, verificationController.setOrgBadge);
 
 module.exports = router;

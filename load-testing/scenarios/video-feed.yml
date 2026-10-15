@@ -1,0 +1,66 @@
+# Phase 10 TASK-10.2 — video feed under load.
+#
+# Why this scenario: /api/videos is the most-trafficked read endpoint after
+# the campaign list, and the only one that joins owner info into a paged
+# cursor response. If the (status, visibility, created_at) index drops out,
+# it degrades to a COLLSCAN across all videos.
+#
+# Arrival shape: ramp to 33/s over 60s, hold 33/s for 180s (≈100 concurrent
+# at ~3s avg latency, well above target), cool to 10/s for 60s.
+config:
+  target: "{{ $processEnvironment.STAGING_URL }}"
+  phases:
+    - duration: 60
+      arrivalRate: 10
+      rampTo: 33
+      name: "ramp"
+    - duration: 180
+      arrivalRate: 33
+      name: "steady 100-concurrent"
+    - duration: 60
+      arrivalRate: 10
+      name: "cool"
+  defaults:
+    headers:
+      user-agent: "artillery/honestneed-load"
+      authorization: "Bearer {{ $processEnvironment.AUTH_TOKEN }}"
+  processor: "../processor.js"
+  ensure:
+    # Acceptance criteria. Both must hold or the run fails.
+    thresholds:
+      - http.response_time.p95: 500
+      - http.response_time.p99: 1200
+    conditions:
+      - expression: "http.codes.200 >= http.requests * 0.995"
+        strict: true
+scenarios:
+  - name: "paged video feed"
+    weight: 90
+    flow:
+      - get:
+          url: "/api/videos?limit=20"
+          expect:
+            - statusCode: 200
+            - hasProperty: "items"
+          capture:
+            - json: "$.next_cursor"
+              as: "cursor"
+      - think: 1
+      - get:
+          url: "/api/videos?limit=20&cursor={{ cursor }}"
+          ifTrue: "cursor"
+          expect:
+            - statusCode: 200
+
+  - name: "filtered feed (veteran)"
+    weight: 10
+    flow:
+      - get:
+          url: "/api/videos?limit=20&is_veteran=true"
+          expect:
+            - statusCode: 200
+
+after:
+  flow:
+    - function: "assertIndexUsage"
+    - log: "video-feed scenario done"

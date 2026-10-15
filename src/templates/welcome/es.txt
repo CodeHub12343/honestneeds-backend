@@ -1,0 +1,7 @@
+Bienvenido, {{displayName}}.
+
+HonestNeed es una comunidad donde personas reales ayudan a sus vecinos con necesidades reales. Gracias por unirte.
+
+Abrir HonestNeed: {{appUrl}}
+
+Recibes este correo porque te registraste en HonestNeed. Si no fuiste tú, puedes ignorarlo.

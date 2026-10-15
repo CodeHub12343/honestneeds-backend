@@ -1,0 +1,148 @@
+{
+  "__comment": "HonestNeed / Phase 10 — launch dashboard. Keep in sync with docs/observability/dashboards.md.",
+  "schemaVersion": 38,
+  "title": "HonestNeed / Phase 10 — launch",
+  "tags": ["honestneed", "phase10", "launch"],
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Promo wallet available",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "honestneed_promo_wallet_available_cents / 100", "legendFormat": "available (USD)" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 50 },
+              { "color": "green", "value": 200 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 }
+    },
+    {
+      "id": 2,
+      "title": "Promo wallet drift (cents, cached vs ledger)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "honestneed_promo_wallet_drift_cents", "legendFormat": "balance drift" },
+        { "expr": "honestneed_promo_wallet_reserved_drift_cents", "legendFormat": "reserved drift" }
+      ],
+      "alert": {
+        "name": "promo_wallet_drift_nonzero",
+        "conditions": [{ "evaluator": { "type": "gt", "params": [0] } }],
+        "for": "5m"
+      },
+      "gridPos": { "x": 6, "y": 0, "w": 18, "h": 4 }
+    },
+    {
+      "id": 3,
+      "title": "Video upload success rate",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(honestneed_video_upload_total{result=\"ok\"}[5m])) / sum(rate(honestneed_video_upload_total[5m]))",
+          "legendFormat": "success"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 } },
+      "alert": {
+        "name": "video_upload_success_lt_90",
+        "conditions": [{ "evaluator": { "type": "lt", "params": [0.9] } }],
+        "for": "5m"
+      },
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 6 }
+    },
+    {
+      "id": 4,
+      "title": "Persona webhook latency p95",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(honestneed_persona_webhook_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "alert": {
+        "name": "persona_webhook_latency_p95_gt_5s",
+        "conditions": [{ "evaluator": { "type": "gt", "params": [5] } }],
+        "for": "5m"
+      },
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 6 }
+    },
+    {
+      "id": 5,
+      "title": "Battle-buddy match rate (accepted / invited)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(honestneed_bb_match_accepted_total[1h])) / sum(rate(honestneed_bb_match_invited_total[1h]))",
+          "legendFormat": "accept rate"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 } },
+      "gridPos": { "x": 0, "y": 10, "w": 12, "h": 6 }
+    },
+    {
+      "id": 6,
+      "title": "Share-reward denial rate (by reason)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(honestneed_share_reward_total{result=\"denied\"}[1h])) by (reason)",
+          "legendFormat": "{{reason}}"
+        }
+      ],
+      "alert": {
+        "name": "share_reward_denial_spike",
+        "conditions": [
+          {
+            "evaluator": { "type": "gt", "params": [2] },
+            "query": {
+              "params": [
+                "sum(rate(honestneed_share_reward_total{result=\"denied\"}[1h])) / sum(rate(honestneed_share_reward_total{result=\"denied\"}[1h] offset 7d))"
+              ]
+            }
+          }
+        ],
+        "for": "15m"
+      },
+      "gridPos": { "x": 12, "y": 10, "w": 12, "h": 6 }
+    },
+    {
+      "id": 7,
+      "title": "Social publish failure rate by provider",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(honestneed_social_publish_total{result!=\"ok\"}[10m])) by (provider) / sum(rate(honestneed_social_publish_total[10m])) by (provider)",
+          "legendFormat": "{{provider}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 } },
+      "alert": {
+        "name": "social_publish_failure_gt_25",
+        "conditions": [{ "evaluator": { "type": "gt", "params": [0.25] } }],
+        "for": "10m"
+      },
+      "gridPos": { "x": 0, "y": 16, "w": 24, "h": 6 }
+    }
+  ]
+}

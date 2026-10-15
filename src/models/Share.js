@@ -192,6 +192,38 @@ const shareRecordSchema = new mongoose.Schema(
       min: 0,
     },
 
+    // ── Phase 3 — evidence integrity (anti-abuse) ─────────────────────
+    // `evidence_hash` is a 64-char hex SHA-256 of the proof asset (image bytes
+    // or external post HTML snapshot). Shares verified with a previously-seen
+    // hash are flagged as duplicates and `evidence_duplicate_of` points at the
+    // first-seen share.
+    evidence_hash: {
+      type: String,
+      default: null,
+      index: true, // scan on verify
+    },
+    evidence_duplicate_of: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ShareRecord',
+      default: null,
+    },
+    // Ordered list of Referer values recorded during share click-through. A
+    // mismatch between declared platform and dominant referer domain triggers
+    // manual review (soft signal — can be legitimately empty for direct taps).
+    referer_chain: {
+      type: [String],
+      default: [],
+    },
+    // Soft trust flags set by ShareVerificationService's harden check.
+    // `requires_manual_review` is additive: the admin queue still receives
+    // the share, this just surfaces WHY.
+    integrity: {
+      requires_manual_review: { type: Boolean, default: false },
+      flags: { type: [String], default: [] },
+      external_post_reachable: { type: Boolean, default: null },
+      last_checked_at: { type: Date, default: null },
+    },
+
     // ===== CONVERSION TRACKING FIELDS =====
     // Click tracking
     clicks: {

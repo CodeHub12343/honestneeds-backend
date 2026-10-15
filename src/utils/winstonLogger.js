@@ -10,9 +10,58 @@ if (!fs.existsSync(logsDir)) {
 }
 
 /**
+ * Log redaction (TASK-5.6). Any field whose key matches one of these patterns,
+ * at any depth in a log record's meta, has its value replaced with the string
+ * ***REDACTED***. Social tokens, cookies and Persona webhook signatures must
+ * never appear in a log; the test in tests/integration/logRedaction.test.js
+ * greps the combined log file to prove it.
+ */
+const REDACT_KEY_PATTERN = /(^|_|-)(authorization|cookie|set-cookie|x-persona-signature|token|access_token|refresh_token|password|secret|apikey|api_key|client_secret)$/i;
+const REDACTED = '***REDACTED***';
+const SAFE_FIELDS = new Set([
+  'tokenExtracted',
+  'tokenLength',
+  'tokenSource',
+  'tokenPreview',
+  'hasAuthHeader',
+  'hasCookieToken',
+  'hasToken',
+]);
+
+function redactValue(value, keyHint) {
+  if (value === null || value === undefined) return value;
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    if (keyHint && REDACT_KEY_PATTERN.test(keyHint) && !SAFE_FIELDS.has(keyHint)) {
+      return REDACTED;
+    }
+    return value;
+  }
+  if (Array.isArray(value)) return value.map((v) => redactValue(v, keyHint));
+  if (typeof value === 'object') {
+    const out = {};
+    for (const [k, v] of Object.entries(value)) {
+      out[k] = (REDACT_KEY_PATTERN.test(k) && !SAFE_FIELDS.has(k))
+        ? (typeof v === 'object' && v !== null ? redactValue(v, k) : REDACTED)
+        : redactValue(v, k);
+    }
+    return out;
+  }
+  return value;
+}
+
+const redactFormatFactory = winston.format((info) => {
+  for (const key of Object.keys(info)) {
+    if (key === 'level' || key === 'message' || key === 'timestamp' || key === 'stack') continue;
+    info[key] = redactValue(info[key], key);
+  }
+  return info;
+});
+
+/**
  * Custom format for colorized console output
  */
 const consoleFormat = winston.format.combine(
+  redactFormatFactory(),
   winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
   winston.format.colorize({
     colors: {
@@ -35,6 +84,7 @@ const consoleFormat = winston.format.combine(
  * JSON format for file output (suitable for log aggregation)
  */
 const jsonFormat = winston.format.combine(
+  redactFormatFactory(),
   winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
   winston.format.errors({ stack: true }),
   winston.format.json()
@@ -93,6 +143,9 @@ if (process.env.NODE_ENV === 'production') {
  */
 const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || 'debug',
+  // Logger-level redaction (TASK-5.6) applies before any transport format, so
+  // transports added later (including ad-hoc ones in tests) still redact.
+  format: redactFormatFactory(),
   defaultMeta: {
     service: 'honestneed-api',
     environment: process.env.NODE_ENV || 'development',

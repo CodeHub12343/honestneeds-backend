@@ -722,4 +722,186 @@ class ShareVerificationService {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Phase 3 — share evidence hardening.
+//
+// Rules applied by `assessIntegrity`:
+//   1. Compute an evidence hash (SHA-256 of the proof URL body OR of the
+//      submitted `evidence_hash` if provided). A hash already seen on a
+//      verified share marks THIS share as a duplicate.
+//   2. Validate the referer chain: the dominant Referer domain MUST plausibly
+//      match the declared platform (`facebook.com` ↔ `facebook`, etc.). A
+//      mismatch is a SOFT flag — queues the share for manual review, does not
+//      auto-reject (users with privacy-restricted browsers legitimately send
+//      no referer).
+//   3. Issue a HEAD against `external_post_url` (if provided) and record
+//      reachability. 404/403 is suspicious; 200 is confirmation.
+//
+// Thresholds + which rules exist can be tuned with real data later. The
+// manual-review flag + flags[] is deliberately additive — no auto-reject
+// here — so a false positive degrades gracefully.
+// ─────────────────────────────────────────────────────────────────────────
+
+const crypto = require('crypto');
+const https = require('https');
+const http = require('http');
+const { URL } = require('url');
+
+const PLATFORM_DOMAIN_MAP = {
+  facebook: ['facebook.com', 'm.facebook.com', 'fb.com', 'fb.watch'],
+  twitter: ['twitter.com', 'x.com', 't.co', 'mobile.twitter.com'],
+  x: ['twitter.com', 'x.com', 't.co'],
+  instagram: ['instagram.com', 'instagr.am'],
+  linkedin: ['linkedin.com', 'lnkd.in'],
+  tiktok: ['tiktok.com', 'vm.tiktok.com'],
+  whatsapp: ['whatsapp.com', 'wa.me'],
+  telegram: ['t.me', 'telegram.me', 'telegram.org'],
+  reddit: ['reddit.com', 'redd.it'],
+};
+
+function hashString(input) {
+  if (!input) return null;
+  return crypto.createHash('sha256').update(String(input), 'utf8').digest('hex');
+}
+
+async function fetchHead(urlStr, timeoutMs = 5000) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const resolveOnce = (v) => {
+      if (settled) return;
+      settled = true;
+      resolve(v);
+    };
+    try {
+      const u = new URL(urlStr);
+      const client = u.protocol === 'http:' ? http : https;
+      const req = client.request(
+        {
+          method: 'HEAD',
+          hostname: u.hostname,
+          port: u.port || (u.protocol === 'http:' ? 80 : 443),
+          path: `${u.pathname}${u.search || ''}`,
+          timeout: timeoutMs,
+          headers: { 'User-Agent': 'HonestNeedShareVerifier/1.0' },
+        },
+        (res) => {
+          resolveOnce({ status: res.statusCode || 0, reachable: res.statusCode < 400 });
+          res.resume();
+        }
+      );
+      req.on('timeout', () => {
+        req.destroy();
+        resolveOnce({ status: 0, reachable: false, timed_out: true });
+      });
+      req.on('error', () => resolveOnce({ status: 0, reachable: false }));
+      req.end();
+    } catch {
+      resolveOnce({ status: 0, reachable: false });
+    }
+  });
+}
+
+function dominantDomain(refererChain) {
+  const counts = {};
+  for (const url of refererChain || []) {
+    try {
+      const host = new URL(url).hostname.toLowerCase().replace(/^www\./, '');
+      counts[host] = (counts[host] || 0) + 1;
+    } catch {
+      /* ignore malformed entries */
+    }
+  }
+  return Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([h]) => h)[0] || null;
+}
+
+function platformMatchesDomain(platform, domain) {
+  if (!platform || !domain) return null;
+  const list = PLATFORM_DOMAIN_MAP[String(platform).toLowerCase()];
+  if (!list) return null;
+  return list.some((d) => domain === d || domain.endsWith(`.${d}`));
+}
+
+/**
+ * Compute integrity signals for a share. Does NOT persist — callers decide.
+ *
+ * @param {Object} share - a Share mongoose doc or plain object
+ * @param {Object} [opts]
+ * @param {string} [opts.evidenceUrl] — URL to an image/attachment proof
+ * @param {string} [opts.evidenceDeclaredHash] — client-provided hash (fallback when no URL)
+ * @param {boolean} [opts.disableNetwork] — skip HEAD request (test mode)
+ * @returns {Promise<Object>}
+ */
+ShareVerificationService.assessIntegrity = async function assessIntegrity(share, opts = {}) {
+  const flags = [];
+  const result = {
+    evidence_hash: null,
+    evidence_duplicate_of: null,
+    external_post_reachable: null,
+    flags,
+    requires_manual_review: false,
+  };
+
+  // 1. Evidence hash
+  const hashInput = opts.evidenceUrl || opts.evidenceDeclaredHash || share.evidence_hash || null;
+  if (hashInput) {
+    result.evidence_hash =
+      // If the caller supplied a 64-char hex it is treated as the hash directly;
+      // otherwise we hash the URL string (and in Phase 3.1 the fetched body).
+      /^[a-f0-9]{64}$/i.test(hashInput) ? hashInput.toLowerCase() : hashString(hashInput);
+
+    if (result.evidence_hash) {
+      const dup = await ShareRecord.findOne({
+        evidence_hash: result.evidence_hash,
+        _id: { $ne: share._id },
+        status: { $in: ['verified', 'pending_verification'] },
+      }).select('_id');
+      if (dup) {
+        result.evidence_duplicate_of = dup._id;
+        flags.push('duplicate_evidence');
+        result.requires_manual_review = true;
+      }
+    }
+  }
+
+  // 2. Referer chain vs platform
+  const dom = dominantDomain(share.referer_chain || []);
+  if (dom) {
+    const matches = platformMatchesDomain(share.channel || share.platform, dom);
+    if (matches === false) {
+      flags.push('referer_platform_mismatch');
+      result.requires_manual_review = true;
+    }
+  }
+
+  // 3. External post reachability (HEAD)
+  if (!opts.disableNetwork && share.external_post_url) {
+    const probe = await fetchHead(share.external_post_url);
+    result.external_post_reachable = !!probe.reachable;
+    if (!probe.reachable) {
+      flags.push(`external_post_unreachable:${probe.status || 'network'}`);
+      result.requires_manual_review = true;
+    }
+  }
+
+  return result;
+};
+
+/**
+ * Persist the result of `assessIntegrity` onto a share. Separate from the
+ * assess step so admin tooling can preview integrity signals without writing.
+ */
+ShareVerificationService.applyIntegrity = async function applyIntegrity(shareId, assessment) {
+  const update = {
+    'integrity.requires_manual_review': !!assessment.requires_manual_review,
+    'integrity.flags': assessment.flags || [],
+    'integrity.external_post_reachable': assessment.external_post_reachable,
+    'integrity.last_checked_at': new Date(),
+  };
+  if (assessment.evidence_hash) update.evidence_hash = assessment.evidence_hash;
+  if (assessment.evidence_duplicate_of) update.evidence_duplicate_of = assessment.evidence_duplicate_of;
+  return ShareRecord.findByIdAndUpdate(shareId, { $set: update }, { new: true });
+};
+
+ShareVerificationService._PLATFORM_DOMAIN_MAP = PLATFORM_DOMAIN_MAP;
+
 module.exports = ShareVerificationService;

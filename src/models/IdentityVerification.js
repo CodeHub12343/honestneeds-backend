@@ -78,6 +78,18 @@ const identityVerificationSchema = new mongoose.Schema(
     // Asset retention due date (set on approval).
     purge_after: { type: Date, default: null },
     assets_purged: { type: Boolean, default: false },
+
+    // ── Persona-hosted identity verification (Phase 2) ─────────────────
+    // All null for submissions created via the legacy upload flow. Populated
+    // only when VerificationService routes a submission through Persona.
+    // `persona_session_token_hash` is a SHA-256 of the session_token so the
+    // raw credential never lands at rest; the hash is enough to correlate a
+    // webhook event back to the row that triggered it.
+    persona_inquiry_id: { type: String, default: null, index: true, sparse: true },
+    persona_session_token_hash: { type: String, default: null },
+    persona_report_id: { type: String, default: null },
+    persona_last_event_id: { type: String, default: null },
+    webhook_last_event_at: { type: Date, default: null },
   },
   {
     timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },
@@ -89,7 +101,10 @@ identityVerificationSchema.index({ status: 1, submitted_at: 1 }); // review queu
 identityVerificationSchema.index({ purge_after: 1 }, { sparse: true });
 
 /**
- * Strip private asset URLs from any serialized output.
+ * Strip private asset URLs AND Persona credentials from any serialized output.
+ * The report_id is kept — it is what the admin UI needs to open the report.
+ * The session_token_hash and last_event_id are internal plumbing and are
+ * stripped as a defense in depth even though they are not themselves secrets.
  */
 identityVerificationSchema.methods.toJSON = function toJSON() {
   const obj = this.toObject();
@@ -99,6 +114,8 @@ identityVerificationSchema.methods.toJSON = function toJSON() {
   delete obj.document_back_public_id;
   delete obj.selfie_url;
   delete obj.selfie_public_id;
+  delete obj.persona_session_token_hash;
+  delete obj.persona_last_event_id;
   return obj;
 };
 

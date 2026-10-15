@@ -222,6 +222,13 @@ app.use(cookieParser());
 const { referralMiddleware } = require('./middleware/referralMiddleware');
 app.use(referralMiddleware());
 
+// Locale resolver — attaches req.locale on every request. Mounted after body
+// parsers + cookie parser so it can read the nf_locale cookie; mounted before
+// route handlers so every endpoint has req.locale available. Note: for routes
+// behind authMiddleware, req.user.locale wins — that resolution happens inside
+// the resolver itself when authMiddleware has already populated req.user.
+app.use(require('./middleware/localeResolver'));
+
 // Request Logging Middleware
 app.use(requestLogger);
 
@@ -307,6 +314,27 @@ app.use('/api/opportunities', require('./routes/opportunityRoutes'));
 app.use('/api/giveaways', require('./routes/giveawayRoutes'));
 // VO-08 Hope Responder Program ("Need Now") — enrollment + emergency dispatch.
 app.use('/api/hope-responders', require('./routes/hopeResponderRoutes'));
+
+// Phase 4 — video platform + community feed + public config read
+app.use('/api/videos', require('./routes/videoRoutes'));
+app.use('/api/community', require('./routes/communityRoutes'));
+app.use('/api/public-config', require('./routes/publicConfigRoutes'));
+
+// Sponsorship Pool portal — public snapshot + user queue position.
+// Admin grant endpoint is mounted under /api/admin from routes/admin/index.js.
+app.use('/api/upgrade-portal', require('./routes/upgradePortalRoutes'));
+
+// Feature discovery — one registry powers home-page hero, /whats-new, nav dots.
+app.use('/api/feature-spotlights', require('./routes/featureSpotlightRoutes'));
+
+// Phase 5 — social-media distribution (OAuth + aggregator)
+app.use('/api/social', require('./routes/socialRoutes'));
+
+// Phase 7 — Veterans / Battle Buddies
+app.use('/api/veterans', require('./routes/veteranRoutes'));
+
+// Phase 9 — Customer support (user surface; staff lives under /api/admin/support)
+app.use('/api/support', require('./routes/supportRoutes'));
 
 // ✅ NEW: Rewards & Gamification (RG-02..RG-21)
 // XP/levels/badges, streaks, leaderboards, missions, golden tickets, viral
@@ -472,9 +500,38 @@ const startServer = async () => {
     const ExpireBoostsJob = require('./jobs/ExpireBoosts');
     const DecayCommunityBoostsJob = require('./jobs/DecayCommunityBoosts');
     const CheckSharePayoutReadinessJob = require('./jobs/CheckSharePayoutReadiness');
+    const PromoWalletReconciliationJob = require('./jobs/PromoWalletReconciliation');
+    const UpgradePortalReconciliationJob = require('./jobs/UpgradePortalReconciliation');
     const { executeMontlyDrawing } = require('./jobs/sweepstakesDrawing');
     const cron = require('node-cron');
-    
+
+    // Phase 6 — nightly promo-wallet reconciliation at 03:00 UTC.
+    cron.schedule('0 3 * * *', async () => {
+      logger.info('⏰ Starting scheduled PromoWalletReconciliation job');
+      try {
+        const result = await PromoWalletReconciliationJob.run();
+        logger.info('✅ PromoWalletReconciliation job completed', result);
+      } catch (error) {
+        logger.error('❌ PromoWalletReconciliation job failed', { error: error.message });
+      }
+    });
+    logger.info('📅 PromoWalletReconciliation job scheduled daily at 03:00 UTC');
+
+    // Upgrade portal — pool-funded request / ledger consistency check.
+    // Runs 10 minutes after the wallet recon so that any auto-correction the
+    // wallet job applied is reflected in this scan.
+    cron.schedule('10 3 * * *', async () => {
+      logger.info('⏰ Starting scheduled UpgradePortalReconciliation job');
+      try {
+        const result = await UpgradePortalReconciliationJob.run();
+        logger.info('✅ UpgradePortalReconciliation job completed', result);
+      } catch (error) {
+        logger.error('❌ UpgradePortalReconciliation job failed', { error: error.message });
+      }
+    });
+    logger.info('📅 UpgradePortalReconciliation job scheduled daily at 03:10 UTC');
+
+
     // Schedule ProcessShareHolds job to run hourly at minute 0
     const shareHoldsJob = cron.schedule('0 * * * *', async () => {
       logger.info('⏰ Starting scheduled ProcessShareHolds job');

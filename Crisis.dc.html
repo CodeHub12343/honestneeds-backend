@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Battle Buddies — Design System</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=DM+Sans:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&display=swap">
+<style>
+body{margin:0;font-family:'DM Sans',system-ui,sans-serif;color:#0B1220;background:#FDFCF9}
+*{box-sizing:border-box}
+h1,h2,h3,h4{font-family:'Archivo',sans-serif;margin:0;letter-spacing:-0.01em}
+.serif{font-family:'Instrument Serif',Georgia,serif}
+.sw{border-radius:8px;padding:16px;color:#F5F2EB;display:flex;flex-direction:column;justify-content:space-between;min-height:92px;font-size:11px;font-weight:600;letter-spacing:0.03em}
+.swd{color:#0B1220}
+.hex{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;font-weight:500;opacity:0.9}
+</style>
+</helmet>
+<div style="width:1500px;height:1400px;padding:48px 56px;background:#FDFCF9;display:flex;flex-direction:column;gap:36px">
+
+<!-- Header -->
+<header style="display:flex;align-items:center;justify-content:space-between;padding-bottom:20px;border-bottom:2px solid #0B1A33">
+  <div style="display:flex;align-items:center;gap:16px">
+    <img src="/_blob/b5a1e71277ac66329f9f33c95ebc95a5" alt="" style="width:72px;height:72px;object-fit:contain">
+    <div>
+      <h1 style="font-size:36px;font-weight:900;color:#0B1A33;line-height:1;text-transform:uppercase">Battle Buddies — Design System</h1>
+      <p style="margin:6px 0 0;font-size:14px;color:#4A5A72">A dignified, modern veteran-support identity · HonestNeed Veterans Program · v1.0</p>
+    </div>
+  </div>
+  <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+    <span style="font-family:'Archivo',sans-serif;font-size:11px;font-weight:700;letter-spacing:0.2em;color:#B01E2E;text-transform:uppercase">Honor · Support · Connect · Empower</span>
+    <span style="font-size:12px;color:#4A5A72">Target: WCAG 2.2 AA</span>
+  </div>
+</header>
+
+<!-- Colors -->
+<section style="display:grid;grid-template-columns:1fr 1fr;gap:32px">
+  <div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+      <span style="width:4px;height:20px;background:#B01E2E"></span>
+      <h2 style="font-size:14px;font-weight:800;letter-spacing:0.15em;text-transform:uppercase;color:#0B1A33">Palette</h2>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px">
+      <div class="sw" style="background:#07101F"><strong>Deep Navy</strong><span class="hex">#07101F</span></div>
+      <div class="sw" style="background:#0B1A33"><strong>Navy</strong><span class="hex">#0B1A33</span></div>
+      <div class="sw" style="background:#1D3156"><strong>Royal</strong><span class="hex">#1D3156</span></div>
+      <div class="sw" style="background:#425571"><strong>Steel</strong><span class="hex">#425571</span></div>
+      <div class="sw swd" style="background:#B8BDC4"><strong>Silver</strong><span class="hex">#B8BDC4</span></div>
+
+      <div class="sw" style="background:#B01E2E"><strong>Primary Red</strong><span class="hex">#B01E2E</span></div>
+      <div class="sw" style="background:#8B1522"><strong>Red Hover</strong><span class="hex">#8B1522</span></div>
+      <div class="sw" style="background:#C8102E;border:2px solid #0B1A33"><strong>CRISIS ONLY</strong><span class="hex">#C8102E</span></div>
+      <div class="sw" style="background:#C9A646"><strong>Mission Gold</strong><span class="hex">#C9A646</span></div>
+      <div class="sw" style="background:#558A42"><strong>Success</strong><span class="hex">#558A42</span></div>
+
+      <div class="sw swd" style="background:#F5F2EB;border:1px solid rgba(11,26,51,0.1)"><strong>Ivory BG</strong><span class="hex">#F5F2EB</span></div>
+      <div class="sw swd" style="background:#FDFCF9;border:1px solid rgba(11,26,51,0.1)"><strong>Paper</strong><span class="hex">#FDFCF9</span></div>
+      <div class="sw swd" style="background:#E3DACC"><strong>Oat</strong><span class="hex">#E3DACC</span></div>
+      <div class="sw" style="background:#0B1220"><strong>Text</strong><span class="hex">#0B1220</span></div>
+      <div class="sw" style="background:#4A5A72"><strong>Muted</strong><span class="hex">#4A5A72</span></div>
+    </div>
+    <p style="margin:14px 0 0;font-size:12px;color:#4A5A72;line-height:1.6">Navy carries authority. Red is used sparingly for primary action and warmth. <strong style="color:#B01E2E">Crisis red (#C8102E)</strong> is reserved — never used for ordinary CTAs. Gold is the "patriotic accent" — minimal, metallic, dignified.</p>
+  </div>
+
+  <div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+      <span style="width:4px;height:20px;background:#B01E2E"></span>
+      <h2 style="font-size:14px;font-weight:800;letter-spacing:0.15em;text-transform:uppercase;color:#0B1A33">Typography</h2>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:16px;background:#F5F2EB;border-radius:10px;padding:24px">
+      <div>
+        <span style="font-size:11px;color:#4A5A72;font-weight:600;letter-spacing:0.1em;text-transform:uppercase">Display · Archivo 800/900</span>
+        <h1 style="font-size:52px;line-height:0.95;font-weight:900;color:#0B1A33;text-transform:uppercase;margin-top:6px">No Veteran Stands Alone</h1>
+      </div>
+      <div>
+        <span style="font-size:11px;color:#4A5A72;font-weight:600;letter-spacing:0.1em;text-transform:uppercase">Serif accent · Instrument Serif italic</span>
+        <p class="serif" style="font-size:34px;line-height:1.1;color:#B01E2E;font-style:italic;margin:6px 0 0">You served for us. Now we're here for you.</p>
+      </div>
+      <div>
+        <span style="font-size:11px;color:#4A5A72;font-weight:600;letter-spacing:0.1em;text-transform:uppercase">Body · DM Sans 400/500</span>
+        <p style="font-size:16px;line-height:1.6;color:#0B1220;margin:6px 0 0">The platform helps veterans find connection, friendship, and community before a hard moment becomes a crisis.</p>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;font-size:12px;color:#4A5A72">
+        <div><strong style="color:#0B1A33;display:block">Display</strong>Archivo 800/900, uppercase, tight letter-spacing</div>
+        <div><strong style="color:#0B1A33;display:block">Body</strong>DM Sans, 15–17px, line-height 1.55–1.65</div>
+        <div><strong style="color:#0B1A33;display:block">Accent</strong>Instrument Serif italic — mission, emotion</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Components -->
+<section>
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+    <span style="width:4px;height:20px;background:#B01E2E"></span>
+    <h2 style="font-size:14px;font-weight:800;letter-spacing:0.15em;text-transform:uppercase;color:#0B1A33">Components</h2>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px">
+
+    <!-- Buttons -->
+    <div style="background:#F5F2EB;border-radius:10px;padding:20px;display:flex;flex-direction:column;gap:12px">
+      <strong style="font-size:12px;color:#4A5A72;letter-spacing:0.1em;text-transform:uppercase">Buttons</strong>
+      <button style="background:#B01E2E;color:#F5F2EB;border:none;padding:14px 22px;border-radius:4px;font-family:'Archivo',sans-serif;font-weight:700;font-size:14px;letter-spacing:0.03em;text-transform:uppercase">Primary action</button>
+      <button style="background:#0B1A33;color:#F5F2EB;border:none;padding:14px 22px;border-radius:4px;font-family:'Archivo',sans-serif;font-weight:700;font-size:14px;letter-spacing:0.03em;text-transform:uppercase">Secondary / Nav</button>
+      <button style="background:transparent;color:#0B1A33;border:2px solid #0B1A33;padding:12px 20px;border-radius:4px;font-family:'Archivo',sans-serif;font-weight:700;font-size:14px;letter-spacing:0.03em;text-transform:uppercase">Ghost</button>
+      <button style="background:#C8102E;color:#F5F2EB;border:none;padding:14px 22px;border-radius:4px;font-family:'Archivo',sans-serif;font-weight:800;font-size:14px;letter-spacing:0.05em;text-transform:uppercase;display:flex;align-items:center;justify-content:center;gap:8px">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2 L2 20 h20 Z"/><line x1="12" y1="9" x2="12" y2="14"/></svg>
+        Crisis Only
+      </button>
+    </div>
+
+    <!-- Buddy chips & badges -->
+    <div style="background:#F5F2EB;border-radius:10px;padding:20px;display:flex;flex-direction:column;gap:12px">
+      <strong style="font-size:12px;color:#4A5A72;letter-spacing:0.1em;text-transform:uppercase">Chips & Badges</strong>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">
+        <span style="padding:5px 12px;border-radius:999px;font-size:12px;font-weight:600;background:rgba(29,49,86,0.1);color:#1D3156">Army</span>
+        <span style="padding:5px 12px;border-radius:999px;font-size:12px;font-weight:600;background:rgba(29,49,86,0.1);color:#1D3156">Marines</span>
+        <span style="padding:5px 12px;border-radius:999px;font-size:12px;font-weight:600;background:rgba(29,49,86,0.1);color:#1D3156">OEF/OIF</span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:4px;font-size:12px;font-weight:700;background:#558A42;color:#F5F2EB"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>Verified Vet</span>
+        <span style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:4px;font-size:12px;font-weight:700;background:#C9A646;color:#0B1A33">Peer Mentor</span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:4px;font-size:12px;font-weight:700;background:rgba(176,30,46,0.1);color:#8B1522;border:1px solid rgba(176,30,46,0.3)">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2 L2 20 h20 Z"/></svg>Crisis Help
+        </span>
+        <span style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:4px;font-size:12px;font-weight:700;background:#F5F2EB;color:#4A5A72;border:1px solid rgba(11,26,51,0.15)">Supporter</span>
+      </div>
+    </div>
+
+    <!-- Avatar sizes -->
+    <div style="background:#F5F2EB;border-radius:10px;padding:20px;display:flex;flex-direction:column;gap:12px">
+      <strong style="font-size:12px;color:#4A5A72;letter-spacing:0.1em;text-transform:uppercase">Avatars</strong>
+      <div style="display:flex;align-items:center;gap:14px">
+        <div style="width:24px;height:24px;border-radius:50%;background:linear-gradient(135deg,#B8BDC4,#425571)"></div>
+        <div style="width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#C9A646,#8B6914)"></div>
+        <div style="width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#558A42,#2E5020);position:relative"><span style="position:absolute;bottom:-2px;right:-2px;width:14px;height:14px;border-radius:50%;background:#558A42;border:2px solid #F5F2EB"></span></div>
+        <div style="width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,#1D3156,#07101F);position:relative"><span style="position:absolute;bottom:0;right:0;background:#C9A646;color:#0B1A33;font-size:10px;font-weight:800;padding:2px 6px;border-radius:4px;border:2px solid #F5F2EB">V</span></div>
+      </div>
+      <span style="font-size:11px;color:#4A5A72">V badge = verified. Green dot = online. Avatars use subtle metallic gradients, never emoji.</span>
+    </div>
+
+    <!-- Buddy card -->
+    <div style="background:#FDFCF9;border-radius:10px;border:1px solid rgba(11,26,51,0.08);padding:16px;display:flex;flex-direction:column;gap:12px">
+      <strong style="font-size:11px;color:#4A5A72;letter-spacing:0.1em;text-transform:uppercase">Buddy Card</strong>
+      <div style="display:flex;align-items:center;gap:12px">
+        <div style="width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#425571,#1D3156);position:relative;flex-shrink:0"><span style="position:absolute;bottom:-2px;right:-2px;background:#558A42;color:#F5F2EB;font-size:10px;font-weight:800;padding:1px 5px;border-radius:4px;border:2px solid #FDFCF9">V</span></div>
+        <div style="flex:1">
+          <strong style="font-size:15px;color:#0B1A33;display:block">Marcus T.</strong>
+          <span style="font-size:12px;color:#4A5A72">Army · 2008–2016 · Dayton, OH · 4 mi</span>
+        </div>
+      </div>
+      <p style="font-size:13px;color:#0B1220;margin:0;line-height:1.5">Fishing, early-morning gym, dad to twins. Looking for a weekly check-in buddy.</p>
+      <div style="display:flex;gap:4px;flex-wrap:wrap">
+        <span style="font-size:11px;background:rgba(29,49,86,0.08);color:#1D3156;padding:3px 8px;border-radius:4px;font-weight:600">Fitness</span>
+        <span style="font-size:11px;background:rgba(29,49,86,0.08);color:#1D3156;padding:3px 8px;border-radius:4px;font-weight:600">Fishing</span>
+        <span style="font-size:11px;background:rgba(29,49,86,0.08);color:#1D3156;padding:3px 8px;border-radius:4px;font-weight:600">Parenting</span>
+      </div>
+      <button style="background:#B01E2E;color:#F5F2EB;border:none;padding:10px;border-radius:4px;font-family:'Archivo',sans-serif;font-weight:700;font-size:12px;letter-spacing:0.05em;text-transform:uppercase">Send Connect Request</button>
+    </div>
+
+    <!-- Form input -->
+    <div style="background:#F5F2EB;border-radius:10px;padding:20px;display:flex;flex-direction:column;gap:10px">
+      <strong style="font-size:12px;color:#4A5A72;letter-spacing:0.1em;text-transform:uppercase">Form Elements</strong>
+      <label style="display:flex;flex-direction:column;gap:6px">
+        <span style="font-size:12px;font-weight:600;color:#0B1A33">What are you looking for?</span>
+        <select style="padding:11px 14px;border:1.5px solid rgba(11,26,51,0.15);border-radius:6px;background:#FDFCF9;font-size:14px;color:#0B1220;font-family:inherit">
+          <option>A one-on-one Battle Buddy</option>
+        </select>
+      </label>
+      <label style="display:flex;flex-direction:column;gap:6px">
+        <span style="font-size:12px;font-weight:600;color:#0B1A33">City or ZIP</span>
+        <input type="text" placeholder="Columbus, OH" style="padding:11px 14px;border:1.5px solid rgba(11,26,51,0.15);border-radius:6px;background:#FDFCF9;font-size:14px;color:#0B1220;font-family:inherit">
+      </label>
+      <label style="display:flex;align-items:center;gap:10px;padding:10px;border-radius:6px;background:#FDFCF9;border:1px solid rgba(11,26,51,0.1)">
+        <input type="checkbox" checked style="width:18px;height:18px;accent-color:#B01E2E">
+        <span style="font-size:13px;color:#0B1220">Match me with verified veterans only</span>
+      </label>
+    </div>
+
+    <!-- Alert / Notification -->
+    <div style="background:#F5F2EB;border-radius:10px;padding:20px;display:flex;flex-direction:column;gap:10px">
+      <strong style="font-size:12px;color:#4A5A72;letter-spacing:0.1em;text-transform:uppercase">Alerts & Notices</strong>
+      <div style="background:rgba(85,138,66,0.1);border:1px solid rgba(85,138,66,0.3);border-radius:6px;padding:12px;display:flex;align-items:center;gap:10px;font-size:13px;color:#2E5020">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><polyline points="8 12 11 15 16 9"/></svg>
+        Connection request sent to Marcus T.
+      </div>
+      <div style="background:rgba(201,166,70,0.12);border:1px solid rgba(201,166,70,0.4);border-radius:6px;padding:12px;display:flex;align-items:center;gap:10px;font-size:13px;color:#5C4A14">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/></svg>
+        Finish your profile to see better matches.
+      </div>
+      <div style="background:#8B0C1F;color:#F5F2EB;border-radius:6px;padding:12px;display:flex;align-items:center;gap:10px;font-size:13px;font-weight:600">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2 L2 20 h20 Z"/><line x1="12" y1="9" x2="12" y2="14"/></svg>
+        Crisis help · available 24/7 — Call 988 → Press 1
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Principles footer -->
+<footer style="background:#0B1A33;color:#F5F2EB;border-radius:10px;padding:28px;display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;gap:28px;margin-top:8px">
+  <div>
+    <strong style="font-family:'Archivo',sans-serif;font-size:12px;letter-spacing:0.2em;color:#C9A646;text-transform:uppercase">Design Principles</strong>
+    <p style="font-size:14px;line-height:1.6;color:rgba(245,242,235,0.85);margin:8px 0 0">Dignified, warm, modern. Patriotic restraint over recruitment aesthetics. Human-first, never fear-based.</p>
+  </div>
+  <div><strong style="font-size:12px;color:#C9A646;letter-spacing:0.15em;text-transform:uppercase;font-family:'Archivo',sans-serif">Spacing</strong><p style="font-size:13px;line-height:1.6;color:rgba(245,242,235,0.75);margin:6px 0 0">8pt scale · 8/12/16/24/32/48/72/112</p></div>
+  <div><strong style="font-size:12px;color:#C9A646;letter-spacing:0.15em;text-transform:uppercase;font-family:'Archivo',sans-serif">Radius</strong><p style="font-size:13px;line-height:1.6;color:rgba(245,242,235,0.75);margin:6px 0 0">4px buttons · 6–8px inputs · 10–12px cards</p></div>
+  <div><strong style="font-size:12px;color:#C9A646;letter-spacing:0.15em;text-transform:uppercase;font-family:'Archivo',sans-serif">Breakpoints</strong><p style="font-size:13px;line-height:1.6;color:rgba(245,242,235,0.75);margin:6px 0 0">360 · 480 · 768 · 1024 · 1280 · 1440</p></div>
+</footer>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1500,"height":1400}}'>
+class Component extends DCLogic { renderVals(){return{};} }
+</script>
+</body>
+</html>

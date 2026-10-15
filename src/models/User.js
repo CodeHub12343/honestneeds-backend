@@ -82,6 +82,63 @@ const userSchema = new mongoose.Schema(
       maxlength: 2000,
       default: '',
     },
+
+    // ── Phase 4 — social + custom links (profile) ─────────────────────
+    // `social_links` are drawn from a short known-platforms list so the UI can
+    // render recognisable icons. `other_links` carry a user-supplied label
+    // for anything outside that list (portfolio, shop, podcast, etc.).
+    // Validation (URL shape, caps, http(s)-only) is enforced by ProfileService
+    // on write — the model trusts the service to have cleaned.
+    social_links: {
+      type: [
+        new mongoose.Schema(
+          {
+            platform: {
+              type: String,
+              enum: ['facebook', 'instagram', 'twitter', 'x', 'linkedin', 'tiktok', 'youtube', 'twitch', 'threads'],
+              required: true,
+            },
+            url: { type: String, required: true, maxlength: 200 },
+          },
+          { _id: false }
+        ),
+      ],
+      default: [],
+      validate: { validator: (v) => !v || v.length <= 10, message: 'Up to 10 social links' },
+    },
+    other_links: {
+      type: [
+        new mongoose.Schema(
+          {
+            label: { type: String, required: true, maxlength: 40, trim: true },
+            url: { type: String, required: true, maxlength: 200 },
+          },
+          { _id: false }
+        ),
+      ],
+      default: [],
+      validate: { validator: (v) => !v || v.length <= 5, message: 'Up to 5 other links' },
+    },
+    // Which platform the user shares to by default. Used by the Phase 6 promo
+    // reward rules (platform must match the sharer's declared primary).
+    primary_social_platform: {
+      type: String,
+      enum: [null, 'facebook', 'instagram', 'twitter', 'x', 'linkedin', 'tiktok', 'youtube', 'twitch', 'threads', 'other'],
+      default: null,
+    },
+
+    // UI + email language preference. Stored lowercase BCP-47 primary subtag
+    // (e.g. 'en', 'es'). The source of truth for valid values lives in
+    // src/config/i18n.js — writes outside that list are rejected by the
+    // profile route, not the model (so adding a locale doesn't require a
+    // schema change).
+    locale: {
+      type: String,
+      lowercase: true,
+      trim: true,
+      maxlength: 10,
+      default: 'en',
+    },
     role: {
       type: String,
       enum: ['user', 'creator', 'admin'],
@@ -317,6 +374,76 @@ const userSchema = new mongoose.Schema(
       show_location: { type: Boolean, default: true },
     },
 
+    // ── Feature spotlights the user has dismissed ─────────────────────
+    // Stable keys from FeatureSpotlight.key. Reserved: never persist raw
+    // titles here; dismissals should survive copy edits to the spotlight.
+    dismissed_spotlights: {
+      type: [{ type: String, maxlength: 80 }],
+      default: [],
+    },
+
+    // ── Veteran profile (Phase 7 / TASK-7.2) ──────────────────────────
+    // Private fields (discharge_type, mos) are stripped by toJSON when the
+    // viewer is not the user themselves. Set `req.selfViewUserId` on reads to
+    // mark the viewer as self; absent, the response is treated as public.
+    veteran_profile: {
+      is_veteran: { type: Boolean, default: false },
+      branch: {
+        type: String,
+        enum: [null, 'army', 'navy', 'marines', 'air_force', 'space_force', 'coast_guard', 'national_guard', 'reserves', 'other'],
+        default: null,
+      },
+      service_years: {
+        from: { type: Number, min: 1900, max: 2100, default: null },
+        to: { type: Number, min: 1900, max: 2100, default: null },
+      },
+      mos: { type: String, maxlength: 50, default: null }, // PRIVATE
+      discharge_type: {
+        // PRIVATE
+        type: String,
+        enum: [null, 'honorable', 'general', 'other_than_honorable', 'bad_conduct', 'dishonorable', 'uncharacterized', 'prefer_not_to_say'],
+        default: null,
+      },
+      interests: { type: [String], default: [] },
+      looking_for: {
+        type: [String],
+        default: [],
+        validate: {
+          validator: (v) =>
+            !v || v.every((x) =>
+              ['friendship', 'mentorship', 'activities', 'resources', 'listening_ear', 'community'].includes(x)
+            ),
+          message: 'Invalid looking_for value',
+        },
+      },
+      location: {
+        city: { type: String, maxlength: 80, default: null },
+        state: { type: String, maxlength: 40, default: null },
+        country: { type: String, maxlength: 40, default: 'US' },
+        // geo stays undefined until the user supplies coordinates — a
+        // half-populated {type:'Point'} tripped the 2dsphere key extractor.
+        geo: {
+          type: { type: String, enum: ['Point'] },
+          coordinates: { type: [Number] },
+        },
+      },
+      verified_via: {
+        // null | 'self' | 'dd214' | 'idme' | 'admin'
+        type: String,
+        enum: [null, 'self', 'dd214', 'idme', 'admin'],
+        default: null,
+      },
+      verified_at: { type: Date, default: null },
+      // DD-214 private asset refs (never returned by toJSON)
+      dd214_url: { type: String, default: null }, // PRIVATE
+      dd214_public_id: { type: String, default: null }, // PRIVATE
+      consent_to_match: { type: Boolean, default: false },
+
+      // Entitlement bookkeeping (TASK-7.11).
+      free_campaign_upgrade_used: { type: Boolean, default: false },
+      free_campaign_upgrade_used_at: { type: Date, default: null },
+    },
+
     // Cached profile completion percentage (0-100) and onboarding flag.
     // Recomputed on profile mutations via recomputeProfileCompletion().
     profile_completion: {
@@ -347,6 +474,13 @@ userSchema.index(
 
 // Geospatial index for location-based queries
 userSchema.index({ 'location.coordinates': '2dsphere' }, { sparse: true });
+
+// Veteran profile indexes (Phase 7).
+userSchema.index(
+  { 'veteran_profile.is_veteran': 1, 'veteran_profile.consent_to_match': 1 },
+  { sparse: true }
+);
+userSchema.index({ 'veteran_profile.location.geo': '2dsphere' }, { sparse: true });
 
 // Compound indexes for common queries
 userSchema.index({ role: 1, created_at: -1 });
@@ -422,6 +556,39 @@ userSchema.methods.toJSON = function toJSON() {
   delete user.password_reset_expires;
   delete user.phone_verification;
 
+  // Veteran profile — strip the fields that are always private, regardless of
+  // viewer. The self-only reveal path uses `toSelfJSON()` below so no code
+  // path can forget which viewer it is talking to.
+  if (user.veteran_profile) {
+    delete user.veteran_profile.mos;
+    delete user.veteran_profile.discharge_type;
+    delete user.veteran_profile.dd214_url;
+    delete user.veteran_profile.dd214_public_id;
+  }
+
+  return user;
+};
+
+/**
+ * toSelfJSON — same as toJSON but keeps the self-only veteran fields that
+ * toJSON strips. The only callers are the `/api/veterans/profile` endpoint
+ * that returns the caller's own profile, and admin-scoped endpoints. Public
+ * code paths must keep using `toJSON()`.
+ */
+userSchema.methods.toSelfJSON = function toSelfJSON() {
+  const user = this.toObject();
+  delete user.password_hash;
+  delete user.verification_token;
+  delete user.verification_token_expires;
+  delete user.password_reset_token;
+  delete user.password_reset_expires;
+  delete user.phone_verification;
+  // Even on self we drop the raw asset URL — it's a signed Cloudinary read
+  // the controller should re-sign if the user wants to view it.
+  if (user.veteran_profile) {
+    delete user.veteran_profile.dd214_url;
+    delete user.veteran_profile.dd214_public_id;
+  }
   return user;
 };
 

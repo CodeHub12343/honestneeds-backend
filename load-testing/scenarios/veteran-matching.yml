@@ -1,0 +1,59 @@
+# Phase 10 TASK-10.2 — veteran match suggestions under load.
+#
+# Why this scenario: BattleBuddyMatchService.suggestFor runs a candidate
+# pull of up to 500 users against the (is_veteran, consent_to_match) partial
+# index, then rescores client-side. If either the partial index or the
+# 2dsphere index drops out, the pull degrades to COLLSCAN across the users
+# collection — which, at scale, saturates mongo well before the HTTP p95
+# target shows the problem.
+config:
+  target: "{{ $processEnvironment.STAGING_URL }}"
+  phases:
+    - duration: 60
+      arrivalRate: 10
+      rampTo: 33
+      name: "ramp"
+    - duration: 180
+      arrivalRate: 33
+      name: "steady 100-concurrent"
+    - duration: 60
+      arrivalRate: 10
+      name: "cool"
+  defaults:
+    headers:
+      user-agent: "artillery/honestneed-load"
+      # Each virtual user is a distinct seeded veteran — tokens come from
+      # the AUTH_TOKENS_JSON env (a JSON array). This prevents the index on
+      # (user_id) in BattleBuddyMatch filling with one hot key.
+      authorization: "Bearer {{ authToken }}"
+  processor: "../processor.js"
+  ensure:
+    thresholds:
+      - http.response_time.p95: 500
+      - http.response_time.p99: 1500
+    conditions:
+      - expression: "http.codes.200 >= http.requests * 0.99"
+        strict: true
+scenarios:
+  - name: "suggestions"
+    beforeScenario: "pickAuthToken"
+    flow:
+      - get:
+          url: "/api/veterans/battle-buddies/suggestions?limit=20"
+          expect:
+            - statusCode: 200
+            - hasProperty: "data"
+
+  - name: "my-matches"
+    beforeScenario: "pickAuthToken"
+    weight: 2
+    flow:
+      - get:
+          url: "/api/veterans/battle-buddies/mine"
+          expect:
+            - statusCode: 200
+
+after:
+  flow:
+    - function: "assertVeteranIndexUsage"
+    - log: "veteran-matching scenario done"

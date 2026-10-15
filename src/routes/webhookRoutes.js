@@ -174,4 +174,19 @@ router.post('/test', async (req, res) => {
   }
 });
 
+// ── Persona identity webhooks (Phase 2) ────────────────────────────────
+// `express.raw` MUST be scoped to this route (NOT global) so the HMAC
+// signature verification sees the untouched request bytes. The Stripe mount
+// above follows the same pattern.
+const personaWebhook = require('../webhooks/persona');
+router.post('/persona', express.raw({ type: 'application/json' }), personaWebhook);
+
+// ── Cloudinary video processing webhook (Phase 4) ──────────────────────
+const cloudinaryVideoWebhook = require('../webhooks/cloudinaryVideo');
+router.post(
+  '/cloudinary/video-processed',
+  express.raw({ type: 'application/json' }),
+  cloudinaryVideoWebhook
+);
+
 module.exports = router;

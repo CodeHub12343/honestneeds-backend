@@ -49,6 +49,50 @@ exports.updateMyProfile = async (req, res, next) => {
 };
 
 /**
+ * PUT /api/users/me/locale
+ * Set the signed-in user's locale preference. Validates against the supported
+ * locale allowlist, stores on the User doc, AND sets the `nf_locale` cookie
+ * so the choice sticks even for requests whose JWT predates the i18n rollout.
+ */
+exports.updateMyLocale = async (req, res, next) => {
+  try {
+    const { normalizeLocale, LOCALE_COOKIE } = require('../config/i18n');
+    const User = require('../models/User');
+    const { t } = require('../i18n/t');
+
+    const requested = req.body && typeof req.body.locale === 'string' ? req.body.locale : null;
+    const resolved = normalizeLocale(requested);
+    if (!resolved) {
+      return res.status(422).json({
+        success: false,
+        error: {
+          code: 'LOCALE_UNSUPPORTED',
+          message: t(req, 'validation.locale_unsupported'),
+        },
+      });
+    }
+
+    await User.updateOne({ _id: req.user.id }, { $set: { locale: resolved } });
+
+    // Mirror into cookie so unauthed requests + legacy-JWT requests behave the
+    // same. Secure+SameSite=Lax so it survives OAuth redirects on same-origin.
+    res.cookie(LOCALE_COOKIE, resolved, {
+      maxAge: 365 * 24 * 60 * 60 * 1000, // 1 year
+      httpOnly: false, // readable by frontend for optimistic UI
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      path: '/',
+    });
+    req.locale = resolved;
+
+    return res.status(200).json({ success: true, data: { locale: resolved } });
+  } catch (error) {
+    winstonLogger.error('Error updating locale', { userId: req.user?.id, message: error.message });
+    return forward(next, error);
+  }
+};
+
+/**
  * GET /api/users/me/profile/completion
  * Completion meter + checklist only (lightweight).
  */

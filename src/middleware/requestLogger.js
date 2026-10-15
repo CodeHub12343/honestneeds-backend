@@ -138,11 +138,21 @@ const errorLogger = (err, req, res, next) => {
 };
 
 /**
- * Sanitize request body to remove sensitive information
+ * Sanitize request body to remove sensitive information.
  */
 function sanitizeBody(body) {
   const sanitized = { ...body };
-  const sensitiveFields = ['password', 'token', 'secret', 'apiKey', 'creditCard'];
+  const sensitiveFields = [
+    'password',
+    'token',
+    'access_token',
+    'refresh_token',
+    'secret',
+    'client_secret',
+    'apiKey',
+    'api_key',
+    'creditCard',
+  ];
 
   sensitiveFields.forEach((field) => {
     if (sanitized[field]) {
@@ -153,4 +163,19 @@ function sanitizeBody(body) {
   return sanitized;
 }
 
-module.exports = { requestLogger, errorLogger };
+/**
+ * Sanitize request headers (TASK-5.6). Returns a plain object; never mutates
+ * the live request. Values of any header matching the redaction pattern are
+ * replaced with ***REDACTED***, so an engineer logging `req.headers` by
+ * mistake still can't leak a token.
+ */
+const HEADER_REDACT_PATTERN =
+  /^(authorization|cookie|set-cookie|x-persona-signature|x-api-key|x-webhook-signature|.*-token|.*-secret)$/i;
+function sanitizeHeaders(headers = {}) {
+  const out = {};
+  for (const [k, v] of Object.entries(headers)) {
+    out[k] = HEADER_REDACT_PATTERN.test(k) ? '***REDACTED***' : v;
+  }
+  return out;
+}
+module.exports = { requestLogger, errorLogger, sanitizeBody, sanitizeHeaders };

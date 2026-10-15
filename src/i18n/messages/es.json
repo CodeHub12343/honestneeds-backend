@@ -1,0 +1,34 @@
+{
+  "common": {
+    "ok": "OK",
+    "cancel": "Cancelar",
+    "save": "Guardar",
+    "retry": "Reintentar",
+    "something_went_wrong": "Algo salió mal. Inténtalo de nuevo."
+  },
+  "validation": {
+    "email_required": "Se requiere una dirección de correo electrónico.",
+    "email_invalid": "Esa dirección de correo no es válida.",
+    "password_required": "Se requiere una contraseña.",
+    "password_too_weak": "La contraseña debe tener al menos 8 caracteres e incluir una letra y un número.",
+    "field_required": "Este campo es obligatorio.",
+    "value_too_short": "Este valor es demasiado corto.",
+    "value_too_long": "Este valor es demasiado largo.",
+    "locale_unsupported": "Ese idioma aún no es compatible."
+  },
+  "auth": {
+    "login_failed": "El correo o la contraseña son incorrectos.",
+    "session_expired": "Tu sesión ha expirado. Por favor, inicia sesión de nuevo.",
+    "logged_out": "Has cerrado sesión."
+  },
+  "campaigns": {
+    "created": "Tu campaña está lista.",
+    "updated": "Campaña actualizada.",
+    "count": "{count, plural, one {# campaña} other {# campañas}}",
+    "progress": "{raised} recaudado de {goal}"
+  },
+  "upgrade": {
+    "requires_payout_method": "Necesitas un método de pago registrado antes de activar el pago a quienes comparten.",
+    "already_a_share_campaign": "Esta campaña ya es una Campaña Compartida."
+  }
+}

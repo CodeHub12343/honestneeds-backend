@@ -1001,6 +1001,380 @@ class EmailService {
   clearSentEmails() {
     this.sentEmails = [];
   }
+
+  /**
+   * Load and render a locale-aware template.
+   *
+   * Templates live at `src/templates/<template>/<locale>.html` and
+   * `.../subject.<locale>.txt`. Fallback order:
+   *   requested locale → DEFAULT_LOCALE → throw.
+   *
+   * Rendering is deliberately simple (`{{var}}` substitution with HTML escape)
+   * — complex templates belong on the frontend or in a dedicated email service.
+   * Keyed cache `template+locale+body/subject`.
+   *
+   * @param {Object} opts
+   * @param {string} opts.template  Template directory name under src/templates/
+   * @param {string} opts.locale    Requested locale (will be normalized)
+   * @param {Object} [opts.data]    Substitution values
+   * @returns {Promise<{html:string,text:string,subject:string,locale:string}>}
+   */
+  async renderTemplate({ template, locale, data = {} }) {
+    const path = require('path');
+    const fs = require('fs').promises;
+    const { normalizeLocale, DEFAULT_LOCALE } = require('../config/i18n');
+    const winstonLogger = require('../utils/winstonLogger');
+
+    if (!template || typeof template !== 'string') {
+      throw new Error('renderTemplate: template name is required');
+    }
+    const requested = normalizeLocale(locale) || DEFAULT_LOCALE;
+
+    const baseDir = path.join(__dirname, '..', 'templates', template);
+    // Ensure template exists at all — a typo must fail loudly, not silently
+    // fall back to English for the wrong template name.
+    try {
+      await fs.access(baseDir);
+    } catch {
+      throw new Error(`renderTemplate: template '${template}' not found`);
+    }
+
+    const tryRead = async (fileName) => {
+      try {
+        return await fs.readFile(path.join(baseDir, fileName), 'utf8');
+      } catch (err) {
+        if (err.code === 'ENOENT') return null;
+        throw err;
+      }
+    };
+
+    this._templateCache = this._templateCache || new Map();
+    const cacheKey = `${template}:${requested}`;
+    if (this._templateCache.has(cacheKey)) {
+      const cached = this._templateCache.get(cacheKey);
+      return {
+        html: EmailService.renderString(cached.html, data),
+        text: EmailService.renderString(cached.text, data),
+        subject: EmailService.renderString(cached.subject, data),
+        locale: cached.locale,
+      };
+    }
+
+    let html = await tryRead(`${requested}.html`);
+    let text = await tryRead(`${requested}.txt`);
+    let subject = await tryRead(`subject.${requested}.txt`);
+    let resolvedLocale = requested;
+
+    if (html === null && requested !== DEFAULT_LOCALE) {
+      winstonLogger.warn('emailService: locale template missing, falling back', {
+        template,
+        requested,
+        fallback: DEFAULT_LOCALE,
+      });
+      html = await tryRead(`${DEFAULT_LOCALE}.html`);
+      text = (await tryRead(`${DEFAULT_LOCALE}.txt`)) || text;
+      subject = (await tryRead(`subject.${DEFAULT_LOCALE}.txt`)) || subject;
+      resolvedLocale = DEFAULT_LOCALE;
+    }
+
+    if (html === null) {
+      throw new Error(`renderTemplate: no HTML body for '${template}' in any locale`);
+    }
+
+    const payload = {
+      html,
+      text: text || EmailService.htmlToText(html),
+      subject: (subject || '').trim() || `HonestNeed — ${template}`,
+      locale: resolvedLocale,
+    };
+    this._templateCache.set(cacheKey, payload);
+
+    return {
+      html: EmailService.renderString(payload.html, data),
+      text: EmailService.renderString(payload.text, data),
+      subject: EmailService.renderString(payload.subject, data),
+      locale: resolvedLocale,
+    };
+  }
+
+  /**
+   * Convenience wrapper — render a template and send it.
+   */
+  async sendTemplated({ to, template, data = {}, locale, metadata = {} }) {
+    const rendered = await this.renderTemplate({ template, locale, data });
+    return this.send({
+      to,
+      subject: rendered.subject,
+      htmlBody: rendered.html,
+      textBody: rendered.text,
+      metadata: { ...metadata, template, locale: rendered.locale },
+    });
+  }
+
+  /**
+   * Minimal `{{var}}` interpolator with HTML escape. Dotted keys supported.
+   * For `{{{var}}}` (triple-brace), substitutes WITHOUT escape — use only
+   * when the value is itself trusted HTML.
+   */
+  static renderString(input, data = {}) {
+    if (typeof input !== 'string') return '';
+    const get = (key) => key.split('.').reduce((acc, k) => (acc == null ? acc : acc[k]), data);
+    return input
+      .replace(/\{\{\{\s*([\w.]+)\s*\}\}\}/g, (_m, key) => {
+        const v = get(key);
+        return v === undefined || v === null ? '' : String(v);
+      })
+      .replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_m, key) => {
+        const v = get(key);
+        if (v === undefined || v === null) return '';
+        return String(v)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+      });
+  }
+
+  /** Strip HTML tags for a text alternative when a .txt file isn't provided. */
+  static htmlToText(html) {
+    return String(html)
+      .replace(/<style[\s\S]*?<\/style>/gi, '')
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<\/?[^>]+>/g, '')
+      .replace(/\s+\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  /** Clear the template cache (test helper). */
+  _clearTemplateCache() {
+    if (this._templateCache) this._templateCache.clear();
+  }
 }
 
-module.exports = new EmailService();
+// ──────────────────────────────────────────────────────────────────────────
+// Marketing (TASK-9.1)
+// ──────────────────────────────────────────────────────────────────────────
+//
+// Thin wrapper around SendGrid Marketing Campaigns + Contacts APIs. Lives
+// here so transactional + marketing share one `provider` field and so the
+// footer templating (unsubscribe + physical address) is in one place.
+//
+// Hard invariant: a MARKETING send goes through `marketing.sendCampaign` /
+// `marketing.sendSingleSend` which inject the unsubscribe footer. A
+// TRANSACTIONAL send goes through the class methods above and must NEVER
+// carry a marketing-unsubscribe link — that would unsubscribe the user from
+// receipts and legal notices.
+
+const SENDGRID_V3 = 'https://api.sendgrid.com/v3';
+
+function marketingCfg() {
+  const key = process.env.SENDGRID_MARKETING_API_KEY;
+  if (!key) {
+    const err = new Error('SENDGRID_MARKETING_API_KEY not configured');
+    err.statusCode = 503;
+    err.code = 'MARKETING_NOT_CONFIGURED';
+    throw err;
+  }
+  const fromEmail = process.env.MARKETING_FROM_EMAIL || process.env.FROM_EMAIL || 'news@honestneed.com';
+  const fromName = process.env.MARKETING_FROM_NAME || process.env.FROM_NAME || 'HonestNeed';
+  const physicalAddress =
+    process.env.MARKETING_PHYSICAL_ADDRESS ||
+    'HonestNeed, Inc. · 1 Market Street, Suite 100 · San Francisco, CA 94105 · USA';
+  const unsubscribeUrl =
+    process.env.MARKETING_UNSUBSCRIBE_URL || 'https://www.honestneed.com/unsubscribe';
+  return { key, fromEmail, fromName, physicalAddress, unsubscribeUrl };
+}
+
+async function sgFetch(path, init = {}, keyOverride = null) {
+  const { key } = keyOverride ? { key: keyOverride } : marketingCfg();
+  const res = await fetch(`${SENDGRID_V3}${path}`, {
+    ...init,
+    headers: {
+      authorization: `Bearer ${key}`,
+      'content-type': 'application/json',
+      ...(init.headers || {}),
+    },
+  });
+  const text = await res.text();
+  let body;
+  try {
+    body = text ? JSON.parse(text) : {};
+  } catch {
+    body = { raw: text };
+  }
+  if (!res.ok) {
+    const err = new Error(
+      body?.errors?.[0]?.message || body?.error || `SendGrid ${res.status}`
+    );
+    err.statusCode = res.status;
+    err.code = 'SENDGRID_ERROR';
+    err.providerBody = body;
+    throw err;
+  }
+  return body;
+}
+
+/**
+ * Compose the CAN-SPAM / GDPR footer. Appended by every marketing writer
+ * before the HTML/text is handed to the provider.
+ */
+function marketingFooter({ unsubscribeUrl, physicalAddress, locale = 'en' }) {
+  const copy = {
+    en: {
+      why: 'You received this because you opted in to HonestNeed updates.',
+      unsub: 'Unsubscribe',
+      prefs: 'manage preferences',
+    },
+    es: {
+      why: 'Recibes este mensaje porque te suscribiste a las actualizaciones de HonestNeed.',
+      unsub: 'Darse de baja',
+      prefs: 'gestionar preferencias',
+    },
+  }[locale] || null;
+  const c = copy || {
+    why: 'You received this because you opted in to HonestNeed updates.',
+    unsub: 'Unsubscribe',
+    prefs: 'manage preferences',
+  };
+  const html = `
+    <hr style="margin:24px 0;border:none;border-top:1px solid #e6e2db" />
+    <p style="font-size:12px;color:#6a6670;line-height:1.5">
+      ${c.why}<br />
+      <a href="${unsubscribeUrl}" style="color:#6a6670">${c.unsub}</a> ·
+      <a href="${unsubscribeUrl}?prefs=1" style="color:#6a6670">${c.prefs}</a><br />
+      ${physicalAddress}
+    </p>`;
+  const text = `\n\n---\n${c.why}\nUnsubscribe: ${unsubscribeUrl}\n${physicalAddress}\n`;
+  return { html, text };
+}
+
+const marketing = {
+  /** POST /marketing/contacts — upsert a contact and add to lists. */
+  async addToList({ email, list_ids = [], custom_fields = {}, locale = 'en' }) {
+    if (!email) {
+      const err = new Error('email required');
+      err.statusCode = 400;
+      err.code = 'INVALID_INPUT';
+      throw err;
+    }
+    const payload = {
+      list_ids,
+      contacts: [
+        {
+          email,
+          custom_fields: { ...custom_fields, locale },
+        },
+      ],
+    };
+    return sgFetch('/marketing/contacts', { method: 'PUT', body: JSON.stringify(payload) });
+  },
+
+  /** DELETE /marketing/lists/{list_id}/contacts — remove contact from one list. */
+  async removeFromList({ email, list_id }) {
+    if (!email || !list_id) {
+      const err = new Error('email + list_id required');
+      err.statusCode = 400;
+      err.code = 'INVALID_INPUT';
+      throw err;
+    }
+    const search = await sgFetch('/marketing/contacts/search', {
+      method: 'POST',
+      body: JSON.stringify({ query: `email LIKE '${email.replace(/'/g, "''")}'` }),
+    });
+    const contact = search?.result?.[0];
+    if (!contact) return { removed: false, reason: 'contact_not_found' };
+    await sgFetch(
+      `/marketing/lists/${encodeURIComponent(list_id)}/contacts?contact_ids=${encodeURIComponent(
+        contact.id
+      )}`,
+      { method: 'DELETE' }
+    );
+    return { removed: true };
+  },
+
+  /**
+   * Append the global unsubscribe to a contact — effectively opts them out
+   * of all marketing. Transactional sends still work (that's SendGrid's
+   * documented behaviour for the global unsubscribe group).
+   */
+  async unsubscribe({ email }) {
+    if (!email) {
+      const err = new Error('email required');
+      err.statusCode = 400;
+      err.code = 'INVALID_INPUT';
+      throw err;
+    }
+    return sgFetch('/asm/suppressions/global', {
+      method: 'POST',
+      body: JSON.stringify({ recipient_emails: [email] }),
+    });
+  },
+
+  /**
+   * Low-level: send a single-send campaign to a list. Appends the footer
+   * so the payload posted to SendGrid already carries the unsubscribe +
+   * physical address — belt-and-braces with SendGrid's own footer tokens.
+   */
+  async sendCampaign({ name, list_ids, subject, html, locale = 'en', send_at = null, dry_run = false }) {
+    if (!name || !subject || !html || !Array.isArray(list_ids) || !list_ids.length) {
+      const err = new Error('name, subject, html, list_ids[] required');
+      err.statusCode = 400;
+      err.code = 'INVALID_INPUT';
+      throw err;
+    }
+    const cfg = marketingCfg();
+    const footer = marketingFooter({
+      unsubscribeUrl: cfg.unsubscribeUrl,
+      physicalAddress: cfg.physicalAddress,
+      locale,
+    });
+    const htmlWithFooter = `${html}${footer.html}`;
+
+    if (dry_run) {
+      return {
+        dry_run: true,
+        preview: { name, subject, list_ids, html: htmlWithFooter, send_at },
+      };
+    }
+
+    const created = await sgFetch('/marketing/singlesends', {
+      method: 'POST',
+      body: JSON.stringify({
+        name,
+        send_to: { list_ids },
+        email_config: {
+          subject,
+          html_content: htmlWithFooter,
+          sender_id: Number(process.env.SENDGRID_SENDER_ID) || undefined,
+          suppression_group_id: Number(process.env.SENDGRID_UNSUB_GROUP_ID) || undefined,
+        },
+      }),
+    });
+
+    const scheduledAt = send_at ? new Date(send_at).toISOString() : new Date().toISOString();
+    const scheduleBody = send_at ? { send_at: scheduledAt } : { send_at: 'now' };
+    await sgFetch(`/marketing/singlesends/${encodeURIComponent(created.id)}/schedule`, {
+      method: 'PUT',
+      body: JSON.stringify(scheduleBody),
+    });
+
+    return { id: created.id, scheduled_at: scheduledAt, dry_run: false };
+  },
+
+  /** List the account's lists (for the admin UI's segment picker). */
+  async listLists() {
+    const body = await sgFetch('/marketing/lists', { method: 'GET' });
+    return body?.result || [];
+  },
+
+  _footerForTests: marketingFooter,
+};
+
+const instance = new EmailService();
+instance.marketing = marketing;
+
+module.exports = instance;
+module.exports.EmailService = EmailService;
+module.exports.marketing = marketing;

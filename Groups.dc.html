@@ -1,0 +1,646 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Battle Buddies for Vets — No Veteran Stands Alone</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=DM+Sans:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&display=swap">
+<style>
+body{margin:0;font-family:'DM Sans',system-ui,sans-serif;color:#0B1220;background:#F5F2EB;-webkit-font-smoothing:antialiased}
+*{box-sizing:border-box}
+a{color:#1D3156;text-decoration:none}
+a:hover{color:#B01E2E}
+h1,h2,h3,h4{font-family:'Archivo',system-ui,sans-serif;letter-spacing:-0.01em;margin:0}
+.serif{font-family:'Instrument Serif',Georgia,serif;font-weight:400;letter-spacing:-0.01em}
+.btn{display:inline-flex;align-items:center;gap:10px;padding:16px 28px;border-radius:4px;font-weight:700;font-size:16px;font-family:'Archivo',sans-serif;letter-spacing:0.02em;text-transform:uppercase;border:none;cursor:pointer}
+.btn-primary{background:#B01E2E;color:#fff;box-shadow:0 1px 0 rgba(0,0,0,0.1)}
+.btn-primary:hover{background:#8B1522;color:#fff}
+.btn-nav{background:#0B1A33;color:#F5F2EB}
+.btn-nav:hover{background:#1D3156;color:#F5F2EB}
+.btn-ghost{background:transparent;color:#0B1A33;border:2px solid #0B1A33}
+.btn-ghost:hover{background:#0B1A33;color:#F5F2EB}
+.btn-light{background:#F5F2EB;color:#0B1A33}
+.btn-light:hover{background:#fff;color:#0B1A33}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;font-size:13px;font-weight:600;background:rgba(29,49,86,0.08);color:#1D3156}
+.rule{height:1px;background:rgba(11,26,51,0.12)}
+.container{max-width:1240px;margin:0 auto;padding-inline:40px}
+.crisis-pill{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border-radius:999px;background:rgba(200,16,46,0.08);color:#8B0C1F;font-weight:700;font-size:13px;border:1px solid rgba(200,16,46,0.3);font-family:'Archivo',sans-serif;letter-spacing:0.03em;text-transform:uppercase}
+.crisis-pill-dark{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border-radius:999px;background:rgba(255,255,255,0.08);color:#F5F2EB;font-weight:700;font-size:12px;border:1px solid rgba(255,255,255,0.25);font-family:'Archivo',sans-serif;letter-spacing:0.05em;text-transform:uppercase}
+.card{background:#FDFCF9;border-radius:8px;border:1px solid rgba(11,26,51,0.08);box-shadow:0 1px 2px rgba(11,26,51,0.04)}
+.flag-rule{height:4px;background:linear-gradient(to right,#0B1A33 0 33.3%,#F5F2EB 33.3% 66.6%,#B01E2E 66.6% 100%)}
+</style>
+</helmet>
+
+<div style="width:100%;min-height:2820px;background:#F5F2EB;display:flex;flex-direction:column">
+
+<!-- UTILITY BAR -->
+<div style="background:#0B1A33;color:#F5F2EB;font-size:13px">
+  <div class="container" style="display:flex;align-items:center;justify-content:space-between;padding-block:10px">
+    <div style="display:flex;align-items:center;gap:18px">
+      <span style="opacity:0.75">A Veteran Connection Program by</span>
+      <strong style="font-family:'Archivo',sans-serif;letter-spacing:0.05em">HONESTNEED</strong>
+    </div>
+    <div style="display:flex;align-items:center;gap:18px">
+      <a href="Crisis.dc.html" style="color:#F5F2EB;display:inline-flex;align-items:center;gap:8px;font-weight:600">
+        <span style="width:8px;height:8px;border-radius:50%;background:#C8102E;box-shadow:0 0 0 3px rgba(200,16,46,0.25)"></span>
+        24/7 Veterans Crisis Line — 988 + Press 1
+      </a>
+      <span style="opacity:0.4">|</span>
+      <a href="#" style="color:#F5F2EB;opacity:0.85">Español</a>
+    </div>
+  </div>
+</div>
+
+<!-- NAV -->
+<nav style="background:#FDFCF9;border-bottom:1px solid rgba(11,26,51,0.08);position:relative;z-index:5">
+  <div class="container" style="display:flex;align-items:center;justify-content:space-between;padding-block:16px;gap:40px">
+    <a href="#" style="display:flex;align-items:center;gap:14px">
+      <img src="/_blob/b5a1e71277ac66329f9f33c95ebc95a5" alt="Battle Buddies for Vets" style="width:56px;height:56px;object-fit:contain">
+      <div style="display:flex;flex-direction:column;line-height:1.1">
+        <strong style="font-family:'Archivo',sans-serif;font-weight:800;font-size:17px;color:#0B1A33;letter-spacing:0.02em">BATTLE BUDDIES</strong>
+        <span style="font-family:'Archivo',sans-serif;font-weight:600;font-size:11px;color:#B01E2E;letter-spacing:0.18em">FOR VETS™</span>
+      </div>
+    </a>
+    <div style="display:flex;align-items:center;gap:32px;font-weight:500;font-size:15px;color:#0B1220">
+      <a href="BattleBuddies.dc.html">Find a Buddy</a>
+      <a href="Groups.dc.html">Groups</a>
+      <a href="#">Activities</a>
+      <a href="#">Resources</a>
+      <a href="GetHelp.dc.html">Get Help</a>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px">
+      <a href="Crisis.dc.html" class="crisis-pill" aria-label="Access crisis support">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8B0C1F" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 L2 20 h20 Z"/><line x1="12" y1="9" x2="12" y2="14"/><circle cx="12" cy="17" r="1" fill="#8B0C1F"/></svg>
+        Crisis Help
+      </a>
+      <a href="Profile.dc.html" class="btn btn-nav" style="padding:12px 20px;font-size:14px">Sign In</a>
+    </div>
+  </div>
+  <div class="flag-rule"></div>
+</nav>
+
+<!-- HERO -->
+<section style="position:relative;background:#0B1A33;color:#F5F2EB;overflow:hidden">
+  <div style="position:absolute;inset:0;background-image:url('/_blob/95234f09e60a3fe7bf1f02c7b97439ab');background-size:cover;background-position:center;opacity:0.35"></div>
+  <div style="position:absolute;inset:0;background:linear-gradient(90deg,rgba(11,26,51,0.95) 0%,rgba(11,26,51,0.78) 50%,rgba(11,26,51,0.5) 100%)"></div>
+  <div class="container" style="position:relative;padding-block:96px 112px;display:grid;grid-template-columns:1.1fr 0.9fr;gap:64px;align-items:center">
+    <div style="display:flex;flex-direction:column;gap:28px">
+      <div style="display:flex;align-items:center;gap:12px">
+        <span style="width:40px;height:2px;background:#C9A646"></span>
+        <span style="font-family:'Archivo',sans-serif;font-weight:700;font-size:13px;letter-spacing:0.3em;color:#C9A646;text-transform:uppercase">You Served For Us</span>
+      </div>
+      <h1 style="font-size:88px;line-height:0.95;font-weight:900;letter-spacing:-0.025em;text-transform:uppercase">
+        No Veteran<br>
+        <span style="color:#F5F2EB">Stands</span> <span style="color:#E85D4A;font-style:italic;font-family:'Instrument Serif',serif;font-weight:400;text-transform:none;letter-spacing:-0.03em">Alone.</span>
+      </h1>
+      <p style="font-size:20px;line-height:1.55;color:rgba(245,242,235,0.85);max-width:560px;margin:0">
+        Battle Buddies for Vets connects veterans with other veterans and caring civilians for friendship, peer support, and real-world community — before a hard moment becomes a crisis.
+      </p>
+      <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:12px">
+        <a href="BattleBuddies.dc.html" class="btn btn-primary">
+          Find a Battle Buddy
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+        </a>
+        <a href="GetHelp.dc.html" class="btn btn-light">Get Help</a>
+        <a href="#" class="btn btn-ghost" style="color:#F5F2EB;border-color:rgba(245,242,235,0.4)">Help a Veteran</a>
+      </div>
+      <div style="display:flex;gap:28px;padding-top:16px;align-items:center">
+        <div style="display:flex;align-items:center;gap:-8px">
+          <div style="width:36px;height:36px;border-radius:50%;background:#425571;border:2px solid #0B1A33;background-image:linear-gradient(135deg,#B8BDC4,#425571)"></div>
+          <div style="width:36px;height:36px;border-radius:50%;background:#C9A646;border:2px solid #0B1A33;margin-left:-10px;background-image:linear-gradient(135deg,#C9A646,#8B6914)"></div>
+          <div style="width:36px;height:36px;border-radius:50%;background:#558A42;border:2px solid #0B1A33;margin-left:-10px;background-image:linear-gradient(135deg,#788C5D,#2E5020)"></div>
+          <div style="width:36px;height:36px;border-radius:50%;background:#1D3156;border:2px solid #0B1A33;margin-left:-10px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#F5F2EB">+12K</div>
+        </div>
+        <div style="font-size:13px;line-height:1.4;color:rgba(245,242,235,0.75)">
+          <strong style="color:#F5F2EB;display:block">[Placeholder: 12,480] veterans + supporters</strong>
+          Already connected across all 50 states
+        </div>
+      </div>
+    </div>
+    <!-- CRISIS CARD — visually separated -->
+    <div style="display:flex;flex-direction:column;gap:18px">
+      <div style="background:#1D3156;border:1px solid rgba(201,166,70,0.3);border-radius:12px;padding:28px;display:flex;flex-direction:column;gap:14px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#C9A646" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-8 8-4.5-.5-8-3-8-8V5l8-3 8 3v8z"/><path d="M9 12l2 2 4-4"/></svg>
+          <h3 style="font-size:16px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:#C9A646">The Battle Buddy Promise</h3>
+        </div>
+        <p class="serif" style="font-size:24px;line-height:1.35;color:#F5F2EB;margin:0">
+          "In the military, you learned to watch out for the person beside you. That doesn't end when the uniform comes off."
+        </p>
+      </div>
+      <div style="background:#8B0C1F;border-radius:12px;padding:22px 24px;display:flex;flex-direction:column;gap:12px;border:1px solid rgba(255,255,255,0.15)">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="width:10px;height:10px;border-radius:50%;background:#F5F2EB;box-shadow:0 0 0 4px rgba(245,242,235,0.2);animation:none"></span>
+          <span class="crisis-pill-dark">In Crisis? Help is here now</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <strong style="font-family:'Archivo',sans-serif;font-size:22px;font-weight:800;color:#F5F2EB;letter-spacing:0.02em">Call 988 → Press 1</strong>
+          <span style="font-size:13px;color:rgba(245,242,235,0.9)">or text 838255 · 24/7 confidential · Veterans Crisis Line</span>
+        </div>
+        <div class="rule" style="background:rgba(255,255,255,0.15);margin-block:4px"></div>
+        <a href="Crisis.dc.html" style="color:#F5F2EB;font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:space-between">
+          See all emergency and professional resources
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </a>
+      </div>
+      <p style="font-size:12px;line-height:1.5;color:rgba(245,242,235,0.6);margin:0;padding-inline:4px">
+        Battle Buddies are peers — not emergency or professional mental-health services. If you're in immediate danger, call 911.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- QUICK-CONNECT STRIP -->
+<section style="background:#FDFCF9;border-bottom:1px solid rgba(11,26,51,0.08)">
+  <div class="container" style="padding-block:40px;display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:32px">
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <strong style="font-family:'Archivo',sans-serif;font-size:32px;font-weight:900;color:#0B1A33">1-on-1</strong>
+      <span style="font-size:13px;color:#4A5A72">Peer connection, your pace</span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;border-left:1px solid rgba(11,26,51,0.08);padding-left:32px">
+      <strong style="font-family:'Archivo',sans-serif;font-size:32px;font-weight:900;color:#0B1A33">Groups</strong>
+      <span style="font-size:13px;color:#4A5A72">By branch, interest, or city</span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;border-left:1px solid rgba(11,26,51,0.08);padding-left:32px">
+      <strong style="font-family:'Archivo',sans-serif;font-size:32px;font-weight:900;color:#0B1A33">Meetups</strong>
+      <span style="font-size:13px;color:#4A5A72">Coffee, fishing, the gym — in person</span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;border-left:1px solid rgba(11,26,51,0.08);padding-left:32px">
+      <strong style="font-family:'Archivo',sans-serif;font-size:32px;font-weight:900;color:#0B1A33">Help</strong>
+      <span style="font-size:13px;color:#4A5A72">Housing, food, work via HonestNeed</span>
+    </div>
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section style="padding-block:96px">
+  <div class="container">
+    <div style="display:flex;align-items:end;justify-content:space-between;gap:40px;margin-bottom:48px">
+      <div style="display:flex;flex-direction:column;gap:12px;max-width:620px">
+        <span class="chip">How Battle Buddies works</span>
+        <h2 style="font-size:48px;line-height:1.05;font-weight:800;color:#0B1A33">Four steps between <span class="serif" style="font-style:italic;color:#B01E2E;font-weight:400">standing alone</span> and standing together.</h2>
+      </div>
+      <a href="#" style="font-weight:600;color:#1D3156;display:inline-flex;align-items:center;gap:8px">
+        Read the full mission
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+      </a>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:20px">
+      <div class="card" style="padding:32px;display:flex;flex-direction:column;gap:20px">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <span style="font-family:'Archivo',sans-serif;font-weight:800;font-size:44px;color:#B8BDC4;line-height:1">01</span>
+          <div style="width:36px;height:36px;border-radius:4px;background:rgba(29,49,86,0.08);display:flex;align-items:center;justify-content:center">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1D3156" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          </div>
+        </div>
+        <div>
+          <h3 style="font-size:19px;font-weight:700;color:#0B1A33;margin-bottom:8px">Tell us what you're looking for</h3>
+          <p style="font-size:14px;line-height:1.6;color:#4A5A72;margin:0">Someone to talk to, a workout partner, a mentor, a group — your call. No forms you can't finish.</p>
+        </div>
+      </div>
+      <div class="card" style="padding:32px;display:flex;flex-direction:column;gap:20px">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <span style="font-family:'Archivo',sans-serif;font-weight:800;font-size:44px;color:#B8BDC4;line-height:1">02</span>
+          <div style="width:36px;height:36px;border-radius:4px;background:rgba(29,49,86,0.08);display:flex;align-items:center;justify-content:center">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1D3156" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          </div>
+        </div>
+        <div>
+          <h3 style="font-size:19px;font-weight:700;color:#0B1A33;margin-bottom:8px">Discover compatible people</h3>
+          <p style="font-size:14px;line-height:1.6;color:#4A5A72;margin:0">Matches on location, branch, interests, and the kind of friendship you're after — not a swipe app.</p>
+        </div>
+      </div>
+      <div class="card" style="padding:32px;display:flex;flex-direction:column;gap:20px;border:1px solid #B01E2E;box-shadow:0 2px 0 #B01E2E">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <span style="font-family:'Archivo',sans-serif;font-weight:800;font-size:44px;color:#B01E2E;line-height:1">03</span>
+          <div style="width:36px;height:36px;border-radius:4px;background:rgba(176,30,46,0.1);display:flex;align-items:center;justify-content:center">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#B01E2E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-8 8-4.5-.5-8-3-8-8V5l8-3 8 3v8z"/></svg>
+          </div>
+        </div>
+        <div>
+          <h3 style="font-size:19px;font-weight:700;color:#0B1A33;margin-bottom:8px">Connect safely</h3>
+          <p style="font-size:14px;line-height:1.6;color:#4A5A72;margin:0">Message in-app first. Verified veterans wear a badge. Report, block, or step back — any time, no explanation needed.</p>
+        </div>
+      </div>
+      <div class="card" style="padding:32px;display:flex;flex-direction:column;gap:20px">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <span style="font-family:'Archivo',sans-serif;font-weight:800;font-size:44px;color:#B8BDC4;line-height:1">04</span>
+          <div style="width:36px;height:36px;border-radius:4px;background:rgba(29,49,86,0.08);display:flex;align-items:center;justify-content:center">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1D3156" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          </div>
+        </div>
+        <div>
+          <h3 style="font-size:19px;font-weight:700;color:#0B1A33;margin-bottom:8px">Build real community</h3>
+          <p style="font-size:14px;line-height:1.6;color:#4A5A72;margin:0">Grab coffee. Work out together. Join a cookout. Keep showing up. That's how no veteran stands alone.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CONNECTION CATEGORIES -->
+<section style="padding-block:72px;background:#FDFCF9">
+  <div class="container">
+    <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:40px;max-width:720px">
+      <span class="chip">Pick a path</span>
+      <h2 style="font-size:40px;line-height:1.1;font-weight:800;color:#0B1A33">What kind of support do you need today?</h2>
+      <p style="font-size:17px;color:#4A5A72;margin:0">You can change your mind, come back later, or try several — no commitment, no judgment.</p>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px">
+      <a href="#" class="card" style="padding:28px;display:flex;flex-direction:column;gap:16px;text-decoration:none;color:inherit;transition:transform 0.15s">
+        <div style="width:48px;height:48px;border-radius:8px;background:#0B1A33;color:#C9A646;display:flex;align-items:center;justify-content:center">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <h3 style="font-size:20px;font-weight:700;color:#0B1A33">Talk to Someone</h3>
+          <p style="font-size:14px;line-height:1.55;color:#4A5A72;margin:0">A peer who's been there. First message in under five minutes.</p>
+        </div>
+        <span style="font-weight:600;color:#B01E2E;font-size:14px;display:inline-flex;align-items:center;gap:6px">Start a conversation →</span>
+      </a>
+      <a href="BattleBuddies.dc.html" class="card" style="padding:28px;display:flex;flex-direction:column;gap:16px;text-decoration:none;color:inherit;background:#0B1A33;color:#F5F2EB;border-color:transparent">
+        <div style="width:48px;height:48px;border-radius:8px;background:#C9A646;color:#0B1A33;display:flex;align-items:center;justify-content:center">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-8 8-4.5-.5-8-3-8-8V5l8-3 8 3v8z"/></svg>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <h3 style="font-size:20px;font-weight:700;color:#F5F2EB">Find a Battle Buddy</h3>
+          <p style="font-size:14px;line-height:1.55;color:rgba(245,242,235,0.75);margin:0">A one-on-one match — someone who gets it, close enough to actually meet.</p>
+        </div>
+        <span style="font-weight:600;color:#C9A646;font-size:14px;display:inline-flex;align-items:center;gap:6px">Browse matches →</span>
+      </a>
+      <a href="Groups.dc.html" class="card" style="padding:28px;display:flex;flex-direction:column;gap:16px;text-decoration:none;color:inherit">
+        <div style="width:48px;height:48px;border-radius:8px;background:#1D3156;color:#F5F2EB;display:flex;align-items:center;justify-content:center">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <h3 style="font-size:20px;font-weight:700;color:#0B1A33">Join a Group</h3>
+          <p style="font-size:14px;line-height:1.55;color:#4A5A72;margin:0">Branch reunions, PTSD peer circles, hobby groups, book clubs.</p>
+        </div>
+        <span style="font-weight:600;color:#B01E2E;font-size:14px;display:inline-flex;align-items:center;gap:6px">See groups near you →</span>
+      </a>
+      <a href="#" class="card" style="padding:28px;display:flex;flex-direction:column;gap:16px;text-decoration:none;color:inherit">
+        <div style="width:48px;height:48px;border-radius:8px;background:#558A42;color:#F5F2EB;display:flex;align-items:center;justify-content:center">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <h3 style="font-size:20px;font-weight:700;color:#0B1A33">Find Activities</h3>
+          <p style="font-size:14px;line-height:1.55;color:#4A5A72;margin:0">Fishing trips, 5Ks, cookouts, VFW nights — in person, this month.</p>
+        </div>
+        <span style="font-weight:600;color:#B01E2E;font-size:14px;display:inline-flex;align-items:center;gap:6px">Browse meetups →</span>
+      </a>
+      <a href="#" class="card" style="padding:28px;display:flex;flex-direction:column;gap:16px;text-decoration:none;color:inherit">
+        <div style="width:48px;height:48px;border-radius:8px;background:#C9A646;color:#0B1A33;display:flex;align-items:center;justify-content:center">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/></svg>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <h3 style="font-size:20px;font-weight:700;color:#0B1A33">Find a Mentor</h3>
+          <p style="font-size:14px;line-height:1.55;color:#4A5A72;margin:0">Transition, VA claims, school, career — vets who've walked it.</p>
+        </div>
+        <span style="font-weight:600;color:#B01E2E;font-size:14px;display:inline-flex;align-items:center;gap:6px">Match me →</span>
+      </a>
+      <a href="#" class="card" style="padding:28px;display:flex;flex-direction:column;gap:16px;text-decoration:none;color:inherit">
+        <div style="width:48px;height:48px;border-radius:8px;background:#B01E2E;color:#F5F2EB;display:flex;align-items:center;justify-content:center">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <h3 style="font-size:20px;font-weight:700;color:#0B1A33">Help Another Veteran</h3>
+          <p style="font-size:14px;line-height:1.55;color:#4A5A72;margin:0">Give rides, mentor, fund a need, show up for a buddy. Supporters welcome.</p>
+        </div>
+        <span style="font-weight:600;color:#B01E2E;font-size:14px;display:inline-flex;align-items:center;gap:6px">Lend a hand →</span>
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- MISSION / SERIF BLOCK -->
+<section style="padding-block:112px;background:#F5F2EB">
+  <div class="container" style="display:grid;grid-template-columns:0.9fr 1.1fr;gap:72px;align-items:start">
+    <div style="position:sticky;top:40px;display:flex;flex-direction:column;gap:20px">
+      <span class="chip">Our mission</span>
+      <h2 class="serif" style="font-size:68px;line-height:1.0;color:#0B1A33;font-style:italic">No Veteran Stands Alone.</h2>
+      <div style="height:3px;width:72px;background:#B01E2E"></div>
+      <p style="font-size:16px;line-height:1.65;color:#4A5A72;margin:0">
+        In the military you learned to watch out for the person beside you. We believe that principle should continue long after someone takes off the uniform.
+      </p>
+      <a href="#" class="btn btn-ghost" style="margin-top:12px;align-self:flex-start">Read the full mission</a>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:28px">
+      <div class="card" style="padding:40px;background:#FDFCF9">
+        <p class="serif" style="font-size:26px;line-height:1.4;color:#0B1A33;margin:0">
+          Our mission is simple but urgent: to make sure no veteran has to face life's hardest moments alone.
+        </p>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+        <div class="card" style="padding:28px;display:flex;flex-direction:column;gap:10px">
+          <strong style="font-family:'Archivo',sans-serif;font-weight:700;color:#B01E2E;font-size:12px;letter-spacing:0.15em;text-transform:uppercase">Sometimes</strong>
+          <p style="font-size:17px;line-height:1.5;color:#0B1220;margin:0">someone needs a person to talk to.</p>
+        </div>
+        <div class="card" style="padding:28px;display:flex;flex-direction:column;gap:10px">
+          <strong style="font-family:'Archivo',sans-serif;font-weight:700;color:#B01E2E;font-size:12px;letter-spacing:0.15em;text-transform:uppercase">Sometimes</strong>
+          <p style="font-size:17px;line-height:1.5;color:#0B1220;margin:0">they need someone to grab a cup of coffee with.</p>
+        </div>
+        <div class="card" style="padding:28px;display:flex;flex-direction:column;gap:10px">
+          <strong style="font-family:'Archivo',sans-serif;font-weight:700;color:#B01E2E;font-size:12px;letter-spacing:0.15em;text-transform:uppercase">Sometimes</strong>
+          <p style="font-size:17px;line-height:1.5;color:#0B1220;margin:0">they need another veteran who understands where they've been.</p>
+        </div>
+        <div class="card" style="padding:28px;display:flex;flex-direction:column;gap:10px">
+          <strong style="font-family:'Archivo',sans-serif;font-weight:700;color:#B01E2E;font-size:12px;letter-spacing:0.15em;text-transform:uppercase">Sometimes</strong>
+          <p style="font-size:17px;line-height:1.5;color:#0B1220;margin:0">they need a group of people reminding them that they still belong.</p>
+        </div>
+      </div>
+      <div style="background:#0B1A33;border-radius:12px;padding:40px;color:#F5F2EB;display:flex;flex-direction:column;gap:14px">
+        <p class="serif" style="font-size:22px;line-height:1.5;color:#F5F2EB;margin:0;font-style:italic">
+          "Our promise: a community where asking for connection is a sign of strength, where veterans build meaningful relationships before reaching a breaking point, and where someone struggling always has somewhere to turn."
+        </p>
+        <div style="height:1px;background:rgba(245,242,235,0.15);margin-top:4px"></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
+          <span style="font-size:14px;color:rgba(245,242,235,0.7)">— The Battle Buddies for Vets team, powered by HonestNeed</span>
+          <a href="#" style="color:#C9A646;font-weight:600;font-size:14px">Share our mission →</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- HONESTNEED INTEGRATION -->
+<section style="padding-block:88px;background:#FDFCF9;border-block:1px solid rgba(11,26,51,0.08)">
+  <div class="container" style="display:grid;grid-template-columns:0.9fr 1.1fr;gap:64px;align-items:center">
+    <div style="display:flex;flex-direction:column;gap:20px">
+      <span class="chip" style="background:rgba(176,30,46,0.08);color:#8B1522">Powered by HonestNeed</span>
+      <h2 style="font-size:40px;line-height:1.1;font-weight:800;color:#0B1A33">Connection first — and real help when you need it.</h2>
+      <p style="font-size:16px;line-height:1.6;color:#4A5A72;margin:0">
+        Battle Buddies for Vets is a program inside HonestNeed. One account, one verified profile. When a buddy or group isn't the answer, the practical assistance of HonestNeed is one click away — housing, food, transportation, employment, and more.
+      </p>
+      <a href="GetHelp.dc.html" class="btn btn-primary" style="align-self:flex-start;margin-top:8px">Get help through HonestNeed →</a>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <div class="card" style="padding:22px;display:flex;flex-direction:column;gap:10px">
+        <div style="width:40px;height:40px;border-radius:6px;background:rgba(29,49,86,0.08);display:flex;align-items:center;justify-content:center">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1D3156" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        </div>
+        <strong style="font-size:15px;color:#0B1A33">Housing</strong>
+        <span style="font-size:13px;color:#4A5A72">Rent assistance, deposits, emergency housing</span>
+      </div>
+      <div class="card" style="padding:22px;display:flex;flex-direction:column;gap:10px">
+        <div style="width:40px;height:40px;border-radius:6px;background:rgba(29,49,86,0.08);display:flex;align-items:center;justify-content:center">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1D3156" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+        </div>
+        <strong style="font-size:15px;color:#0B1A33">Food & essentials</strong>
+        <span style="font-size:13px;color:#4A5A72">Groceries, baby supplies, hygiene kits</span>
+      </div>
+      <div class="card" style="padding:22px;display:flex;flex-direction:column;gap:10px">
+        <div style="width:40px;height:40px;border-radius:6px;background:rgba(29,49,86,0.08);display:flex;align-items:center;justify-content:center">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1D3156" stroke-width="2"><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/><path d="M5 17H3V6a1 1 0 0 1 1-1h9v12M14 17h2M16 5h3l3 5v7h-2"/></svg>
+        </div>
+        <strong style="font-size:15px;color:#0B1A33">Transportation</strong>
+        <span style="font-size:13px;color:#4A5A72">Gas, car repairs, rides to VA appointments</span>
+      </div>
+      <div class="card" style="padding:22px;display:flex;flex-direction:column;gap:10px">
+        <div style="width:40px;height:40px;border-radius:6px;background:rgba(29,49,86,0.08);display:flex;align-items:center;justify-content:center">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1D3156" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+        </div>
+        <strong style="font-size:15px;color:#0B1A33">Employment</strong>
+        <span style="font-size:13px;color:#4A5A72">Veteran-friendly jobs, resume help, training</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- COMMUNITY / ACTIVITIES PREVIEW -->
+<section style="padding-block:88px">
+  <div class="container">
+    <div style="display:flex;align-items:end;justify-content:space-between;margin-bottom:36px;gap:40px">
+      <div style="display:flex;flex-direction:column;gap:12px;max-width:620px">
+        <span class="chip">This month in the community</span>
+        <h2 style="font-size:40px;line-height:1.1;font-weight:800;color:#0B1A33">Activities, groups, and gatherings near you.</h2>
+      </div>
+      <div style="display:flex;gap:10px">
+        <button class="btn btn-ghost" style="padding:10px 18px;font-size:13px">All activities</button>
+        <button class="btn btn-nav" style="padding:10px 18px;font-size:13px">Set location</button>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px">
+      <article class="card" style="padding:0;overflow:hidden;display:flex;flex-direction:column">
+        <div style="height:160px;background:linear-gradient(135deg,#1D3156,#425571);position:relative;display:flex;align-items:flex-end;padding:16px;color:#F5F2EB">
+          <span style="position:absolute;top:14px;left:14px;background:rgba(245,242,235,0.92);color:#8B1522;font-size:11px;font-weight:700;padding:5px 10px;border-radius:4px;letter-spacing:0.1em;text-transform:uppercase">Sat Oct 18</span>
+          <span style="font-family:'Archivo',sans-serif;font-size:14px;font-weight:600;letter-spacing:0.03em">COLUMBUS, OH</span>
+        </div>
+        <div style="padding:22px;display:flex;flex-direction:column;gap:10px">
+          <h3 style="font-size:19px;font-weight:700;color:#0B1A33">Sunrise Coffee + Range Day</h3>
+          <p style="font-size:14px;line-height:1.55;color:#4A5A72;margin:0">Open to all branches. Coffee at the lodge, range optional. First-timers welcome — we partner you up.</p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">
+            <span style="font-size:12px;background:rgba(29,49,86,0.08);color:#1D3156;padding:4px 10px;border-radius:4px;font-weight:600">All vets</span>
+            <span style="font-size:12px;background:rgba(29,49,86,0.08);color:#1D3156;padding:4px 10px;border-radius:4px;font-weight:600">Beginner OK</span>
+          </div>
+          <div class="rule" style="margin-block:8px"></div>
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <span style="font-size:13px;color:#4A5A72"><strong style="color:#0B1A33">[18]</strong> attending · 7 spots left</span>
+            <a href="#" style="font-size:13px;font-weight:700;color:#B01E2E">RSVP →</a>
+          </div>
+        </div>
+      </article>
+      <article class="card" style="padding:0;overflow:hidden;display:flex;flex-direction:column">
+        <div style="height:160px;background:linear-gradient(135deg,#558A42,#2E5020);position:relative;display:flex;align-items:flex-end;padding:16px;color:#F5F2EB">
+          <span style="position:absolute;top:14px;left:14px;background:rgba(245,242,235,0.92);color:#8B1522;font-size:11px;font-weight:700;padding:5px 10px;border-radius:4px;letter-spacing:0.1em;text-transform:uppercase">Sun Oct 26</span>
+          <span style="font-family:'Archivo',sans-serif;font-size:14px;font-weight:600;letter-spacing:0.03em">LAKE TRAVIS, TX</span>
+        </div>
+        <div style="padding:22px;display:flex;flex-direction:column;gap:10px">
+          <h3 style="font-size:19px;font-weight:700;color:#0B1A33">Hooked On Healing Fishing Trip</h3>
+          <p style="font-size:14px;line-height:1.55;color:#4A5A72;margin:0">All gear provided by sponsor. A quiet day on the water with other vets — no agenda, just time.</p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">
+            <span style="font-size:12px;background:rgba(29,49,86,0.08);color:#1D3156;padding:4px 10px;border-radius:4px;font-weight:600">Free</span>
+            <span style="font-size:12px;background:rgba(29,49,86,0.08);color:#1D3156;padding:4px 10px;border-radius:4px;font-weight:600">Sober-friendly</span>
+          </div>
+          <div class="rule" style="margin-block:8px"></div>
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <span style="font-size:13px;color:#4A5A72"><strong style="color:#0B1A33">[9]</strong> attending · 3 spots left</span>
+            <a href="#" style="font-size:13px;font-weight:700;color:#B01E2E">RSVP →</a>
+          </div>
+        </div>
+      </article>
+      <article class="card" style="padding:0;overflow:hidden;display:flex;flex-direction:column">
+        <div style="height:160px;background:linear-gradient(135deg,#8B1522,#B01E2E);position:relative;display:flex;align-items:flex-end;padding:16px;color:#F5F2EB">
+          <span style="position:absolute;top:14px;left:14px;background:rgba(245,242,235,0.92);color:#8B1522;font-size:11px;font-weight:700;padding:5px 10px;border-radius:4px;letter-spacing:0.1em;text-transform:uppercase">Weekly · Tue</span>
+          <span style="font-family:'Archivo',sans-serif;font-size:14px;font-weight:600;letter-spacing:0.03em">VIRTUAL · 7PM ET</span>
+        </div>
+        <div style="padding:22px;display:flex;flex-direction:column;gap:10px">
+          <h3 style="font-size:19px;font-weight:700;color:#0B1A33">Night Shift — After-Hours Peer Circle</h3>
+          <p style="font-size:14px;line-height:1.55;color:#4A5A72;margin:0">For vets who can't sleep. Facilitated by a trained peer. Camera optional, voice welcome, silence okay.</p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">
+            <span style="font-size:12px;background:rgba(29,49,86,0.08);color:#1D3156;padding:4px 10px;border-radius:4px;font-weight:600">Peer-led</span>
+            <span style="font-size:12px;background:rgba(29,49,86,0.08);color:#1D3156;padding:4px 10px;border-radius:4px;font-weight:600">Weekly</span>
+          </div>
+          <div class="rule" style="margin-block:8px"></div>
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <span style="font-size:13px;color:#4A5A72"><strong style="color:#0B1A33">[47]</strong> regulars</span>
+            <a href="#" style="font-size:13px;font-weight:700;color:#B01E2E">Join tonight →</a>
+          </div>
+        </div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- SUPPORTERS -->
+<section style="padding-block:88px;background:#0B1A33;color:#F5F2EB">
+  <div class="container" style="display:grid;grid-template-columns:1.1fr 0.9fr;gap:64px;align-items:center">
+    <div style="display:flex;flex-direction:column;gap:20px">
+      <span class="chip" style="background:rgba(201,166,70,0.15);color:#C9A646;align-self:flex-start">For civilians, businesses, and community leaders</span>
+      <h2 style="font-size:52px;line-height:1.0;font-weight:800;color:#F5F2EB">You don't have to have served to <span class="serif" style="font-style:italic;color:#C9A646;font-weight:400">serve someone who did.</span></h2>
+      <p style="font-size:17px;line-height:1.6;color:rgba(245,242,235,0.78);margin:0;max-width:640px">
+        Volunteers. Mentors. Employers. Nonprofits. Churches. Donors. Neighbors. Battle Buddies for Vets is a community effort — and there's a role shaped for the time, skills, or resources you have.
+      </p>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px">
+        <a href="#" class="btn btn-primary">Become a Supporter</a>
+        <a href="#" class="btn btn-light">Help a Veteran</a>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div style="background:rgba(245,242,235,0.06);border:1px solid rgba(245,242,235,0.1);border-radius:10px;padding:20px 24px;display:flex;align-items:center;gap:18px">
+        <div style="width:44px;height:44px;border-radius:8px;background:#C9A646;color:#0B1A33;display:flex;align-items:center;justify-content:center;font-family:'Archivo',sans-serif;font-weight:900;font-size:16px">V</div>
+        <div style="display:flex;flex-direction:column;gap:2px">
+          <strong style="font-size:15px;color:#F5F2EB">Volunteer an hour a week</strong>
+          <span style="font-size:13px;color:rgba(245,242,235,0.65)">Call a vet, host coffee, show up at a meetup.</span>
+        </div>
+      </div>
+      <div style="background:rgba(245,242,235,0.06);border:1px solid rgba(245,242,235,0.1);border-radius:10px;padding:20px 24px;display:flex;align-items:center;gap:18px">
+        <div style="width:44px;height:44px;border-radius:8px;background:#B01E2E;color:#F5F2EB;display:flex;align-items:center;justify-content:center;font-family:'Archivo',sans-serif;font-weight:900;font-size:16px">M</div>
+        <div style="display:flex;flex-direction:column;gap:2px">
+          <strong style="font-size:15px;color:#F5F2EB">Mentor a transitioning vet</strong>
+          <span style="font-size:13px;color:rgba(245,242,235,0.65)">Career, school, VA claims, parenting, sobriety.</span>
+        </div>
+      </div>
+      <div style="background:rgba(245,242,235,0.06);border:1px solid rgba(245,242,235,0.1);border-radius:10px;padding:20px 24px;display:flex;align-items:center;gap:18px">
+        <div style="width:44px;height:44px;border-radius:8px;background:#558A42;color:#F5F2EB;display:flex;align-items:center;justify-content:center;font-family:'Archivo',sans-serif;font-weight:900;font-size:16px">E</div>
+        <div style="display:flex;flex-direction:column;gap:2px">
+          <strong style="font-size:15px;color:#F5F2EB">Employers: list a veteran-friendly role</strong>
+          <span style="font-size:13px;color:rgba(245,242,235,0.65)">Hiring with intent, not quotas.</span>
+        </div>
+      </div>
+      <div style="background:rgba(245,242,235,0.06);border:1px solid rgba(245,242,235,0.1);border-radius:10px;padding:20px 24px;display:flex;align-items:center;gap:18px">
+        <div style="width:44px;height:44px;border-radius:8px;background:#1D3156;color:#C9A646;display:flex;align-items:center;justify-content:center;font-family:'Archivo',sans-serif;font-weight:900;font-size:16px">D</div>
+        <div style="display:flex;flex-direction:column;gap:2px">
+          <strong style="font-size:15px;color:#F5F2EB">Donate to a veteran's specific need</strong>
+          <span style="font-size:13px;color:rgba(245,242,235,0.65)">Through HonestNeed — 100% goes to the recipient.</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CRISIS BAND — DISTINCT -->
+<section style="padding-block:56px;background:#F5F2EB">
+  <div class="container">
+    <div style="background:#FDFCF9;border:2px solid #B01E2E;border-radius:12px;padding:36px;display:grid;grid-template-columns:auto 1fr auto;gap:28px;align-items:center">
+      <div style="width:72px;height:72px;border-radius:50%;background:rgba(176,30,46,0.1);display:flex;align-items:center;justify-content:center;border:2px solid #B01E2E">
+        <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#B01E2E" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 L2 20 h20 Z"/><line x1="12" y1="9" x2="12" y2="14"/><circle cx="12" cy="17" r="1" fill="#B01E2E"/></svg>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <strong style="font-family:'Archivo',sans-serif;font-size:13px;letter-spacing:0.2em;color:#B01E2E;text-transform:uppercase">In Crisis — Help Available 24/7</strong>
+        <h3 style="font-size:26px;font-weight:800;color:#0B1A33">If you or a veteran you love is in immediate danger, reach a professional now.</h3>
+        <p style="font-size:14px;color:#4A5A72;margin:0;max-width:720px">Battle Buddies are peers. For emergency, mental-health crisis, or safety concerns, the Veterans Crisis Line is staffed 24/7 by trained responders.</p>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;align-items:stretch">
+        <a href="tel:988" class="btn btn-primary" style="justify-content:center">Call 988 → Press 1</a>
+        <a href="Crisis.dc.html" style="font-size:13px;font-weight:600;color:#1D3156;text-align:center">All crisis resources →</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FINAL CTA -->
+<section style="padding-block:112px;background:#F5F2EB">
+  <div class="container" style="display:flex;flex-direction:column;align-items:center;gap:28px;text-align:center">
+    <span class="chip">For every veteran, and everyone who stands with them</span>
+    <h2 style="font-size:76px;line-height:0.95;font-weight:900;color:#0B1A33;max-width:980px;letter-spacing:-0.02em;text-transform:uppercase">You Served For Us. <br><span class="serif" style="font-style:italic;font-weight:400;color:#B01E2E;text-transform:none;letter-spacing:-0.03em">Now we're here for you.</span></h2>
+    <p style="font-size:18px;color:#4A5A72;max-width:620px;line-height:1.6;margin:0">Create a free account. One profile. Four ways to belong.</p>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:12px">
+      <a href="BattleBuddies.dc.html" class="btn btn-primary">Find a Battle Buddy</a>
+      <a href="#" class="btn btn-nav">Become a Supporter</a>
+      <a href="Groups.dc.html" class="btn btn-ghost">Join a Group</a>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer style="background:#07101F;color:rgba(245,242,235,0.7)">
+  <div class="flag-rule"></div>
+  <div class="container" style="padding-block:56px 32px;display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr 1fr;gap:40px">
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <div style="display:flex;align-items:center;gap:12px">
+        <img src="/_blob/b5a1e71277ac66329f9f33c95ebc95a5" alt="Battle Buddies for Vets" style="width:48px;height:48px;object-fit:contain">
+        <div style="display:flex;flex-direction:column;line-height:1.1">
+          <strong style="font-family:'Archivo',sans-serif;font-weight:800;font-size:15px;color:#F5F2EB;letter-spacing:0.02em">BATTLE BUDDIES FOR VETS™</strong>
+          <span style="font-family:'Archivo',sans-serif;font-weight:500;font-size:11px;color:#C9A646;letter-spacing:0.18em">A VETERAN CONNECTION PROGRAM BY HONESTNEED</span>
+        </div>
+      </div>
+      <p style="font-size:13px;line-height:1.6;margin:0;max-width:360px">No Veteran Stands Alone.™ A nonprofit community program building peer support, friendship, and real-world connection for the veterans who served.</p>
+      <div style="display:flex;gap:10px;margin-top:8px">
+        <a href="#" style="width:34px;height:34px;border-radius:50%;background:rgba(245,242,235,0.08);display:flex;align-items:center;justify-content:center" aria-label="Facebook">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="#F5F2EB"><path d="M22 12A10 10 0 1 0 10.4 21.9V15H8V12h2.4V9.7c0-2.4 1.4-3.7 3.6-3.7 1 0 2.2.2 2.2.2v2.4h-1.3c-1.2 0-1.6.8-1.6 1.5V12h2.8l-.5 3h-2.3v6.9A10 10 0 0 0 22 12z"/></svg>
+        </a>
+        <a href="#" style="width:34px;height:34px;border-radius:50%;background:rgba(245,242,235,0.08);display:flex;align-items:center;justify-content:center" aria-label="Instagram">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#F5F2EB" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="0.8" fill="#F5F2EB"/></svg>
+        </a>
+        <a href="#" style="width:34px;height:34px;border-radius:50%;background:rgba(245,242,235,0.08);display:flex;align-items:center;justify-content:center" aria-label="YouTube">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="#F5F2EB"><path d="M22.5 7a2.8 2.8 0 0 0-2-2C18.8 4.5 12 4.5 12 4.5s-6.8 0-8.5.5a2.8 2.8 0 0 0-2 2A28 28 0 0 0 1 12a28 28 0 0 0 .5 5a2.8 2.8 0 0 0 2 2c1.7.5 8.5.5 8.5.5s6.8 0 8.5-.5a2.8 2.8 0 0 0 2-2 28 28 0 0 0 .5-5 28 28 0 0 0-.5-5z"/><polygon points="10 15 15 12 10 9" fill="#07101F"/></svg>
+        </a>
+        <a href="#" style="width:34px;height:34px;border-radius:50%;background:rgba(245,242,235,0.08);display:flex;align-items:center;justify-content:center" aria-label="LinkedIn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="#F5F2EB"><path d="M20 3H4a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1zM8 18H5v-9h3zm-1.5-10a1.75 1.75 0 1 1 0-3.5 1.75 1.75 0 0 1 0 3.5zM18 18h-3v-4.7c0-1.1 0-2.5-1.5-2.5s-1.8 1.2-1.8 2.4V18h-3V9h2.9v1.3h.04c.4-.76 1.4-1.56 2.9-1.56 3 0 3.5 2 3.5 4.6z"/></svg>
+        </a>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <strong style="font-family:'Archivo',sans-serif;font-size:12px;letter-spacing:0.2em;color:#C9A646;text-transform:uppercase">For Veterans</strong>
+      <a href="BattleBuddies.dc.html" style="font-size:14px;color:rgba(245,242,235,0.75)">Find a Battle Buddy</a>
+      <a href="Groups.dc.html" style="font-size:14px;color:rgba(245,242,235,0.75)">Veteran Groups</a>
+      <a href="#" style="font-size:14px;color:rgba(245,242,235,0.75)">Activities & Meetups</a>
+      <a href="#" style="font-size:14px;color:rgba(245,242,235,0.75)">Veteran Resources</a>
+      <a href="Profile.dc.html" style="font-size:14px;color:rgba(245,242,235,0.75)">Manage Profile</a>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <strong style="font-family:'Archivo',sans-serif;font-size:12px;letter-spacing:0.2em;color:#C9A646;text-transform:uppercase">Support</strong>
+      <a href="GetHelp.dc.html" style="font-size:14px;color:rgba(245,242,235,0.75)">Get Help</a>
+      <a href="#" style="font-size:14px;color:rgba(245,242,235,0.75)">Help a Veteran</a>
+      <a href="#" style="font-size:14px;color:rgba(245,242,235,0.75)">Become a Supporter</a>
+      <a href="#" style="font-size:14px;color:rgba(245,242,235,0.75)">Partner with us</a>
+      <a href="#" style="font-size:14px;color:rgba(245,242,235,0.75)">Donate</a>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <strong style="font-family:'Archivo',sans-serif;font-size:12px;letter-spacing:0.2em;color:#C9A646;text-transform:uppercase">In Crisis</strong>
+      <a href="Crisis.dc.html" style="font-size:14px;color:#F5F2EB;font-weight:600;display:inline-flex;align-items:center;gap:6px"><span style="width:7px;height:7px;border-radius:50%;background:#C8102E"></span>Veterans Crisis Line</a>
+      <a href="tel:988" style="font-size:14px;color:rgba(245,242,235,0.75)">Call 988 → Press 1</a>
+      <a href="sms:838255" style="font-size:14px;color:rgba(245,242,235,0.75)">Text 838255</a>
+      <a href="#" style="font-size:14px;color:rgba(245,242,235,0.75)">Chat online</a>
+      <a href="#" style="font-size:14px;color:rgba(245,242,235,0.75)">If in danger: 911</a>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <strong style="font-family:'Archivo',sans-serif;font-size:12px;letter-spacing:0.2em;color:#C9A646;text-transform:uppercase">About</strong>
+      <a href="#" style="font-size:14px;color:rgba(245,242,235,0.75)">Our mission</a>
+      <a href="#" style="font-size:14px;color:rgba(245,242,235,0.75)">HonestNeed.com</a>
+      <a href="#" style="font-size:14px;color:rgba(245,242,235,0.75)">BattleBuddiesForVets.com</a>
+      <a href="#" style="font-size:14px;color:rgba(245,242,235,0.75)">Privacy</a>
+      <a href="#" style="font-size:14px;color:rgba(245,242,235,0.75)">Terms</a>
+      <a href="#" style="font-size:14px;color:rgba(245,242,235,0.75)">Accessibility</a>
+    </div>
+  </div>
+  <div style="border-top:1px solid rgba(245,242,235,0.1)">
+    <div class="container" style="padding-block:20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px;font-size:12px">
+      <span>© [YEAR] Battle Buddies for Vets™ · A program of HonestNeed. All rights reserved.</span>
+      <span>Battle Buddies are peers, not emergency services. If in immediate danger, call 911.</span>
+    </div>
+  </div>
+</footer>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2820}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

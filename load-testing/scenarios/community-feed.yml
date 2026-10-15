@@ -1,0 +1,62 @@
+# Phase 10 TASK-10.2 — community feed under load.
+#
+# Why this scenario: the Phase 4 community feed sort is `created_at desc`
+# with a `status: 'published'` filter. The compound index
+# `(status, created_at)` must be the chosen plan — a sort-stage spill will
+# break the p95 target well before the arrival rate matters.
+config:
+  target: "{{ $processEnvironment.STAGING_URL }}"
+  phases:
+    - duration: 60
+      arrivalRate: 10
+      rampTo: 33
+      name: "ramp"
+    - duration: 180
+      arrivalRate: 33
+      name: "steady 100-concurrent"
+    - duration: 60
+      arrivalRate: 10
+      name: "cool"
+  defaults:
+    headers:
+      user-agent: "artillery/honestneed-load"
+      authorization: "Bearer {{ $processEnvironment.AUTH_TOKEN }}"
+  processor: "../processor.js"
+  ensure:
+    thresholds:
+      - http.response_time.p95: 500
+      - http.response_time.p99: 1200
+    conditions:
+      - expression: "http.codes.200 >= http.requests * 0.995"
+        strict: true
+scenarios:
+  - name: "paged community feed"
+    weight: 85
+    flow:
+      - get:
+          url: "/api/community/posts?limit=20"
+          expect:
+            - statusCode: 200
+          capture:
+            - json: "$.next_cursor"
+              as: "cursor"
+      - think: 1
+      - get:
+          url: "/api/community/posts?limit=20&cursor={{ cursor }}"
+          ifTrue: "cursor"
+          expect:
+            - statusCode: 200
+
+  - name: "cold-start feed"
+    # Fewer of these — purges the cursor cache and forces a fresh plan.
+    weight: 15
+    flow:
+      - get:
+          url: "/api/community/posts?limit=20&_cb={{ $randomNumber(1, 100000) }}"
+          expect:
+            - statusCode: 200
+
+after:
+  flow:
+    - function: "assertIndexUsage"
+    - log: "community-feed scenario done"

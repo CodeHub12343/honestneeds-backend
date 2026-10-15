@@ -65,6 +65,12 @@ const PERMISSIONS = {
 
   // AI subsystem oversight (usage, cost, generation log)
   AI_VIEW: 'ai:view',
+
+  // Phase 9 — email marketing + customer support (TASK-9.2, TASK-9.4)
+  MARKETING_VIEW: 'marketing:view',
+  MARKETING_SEND: 'marketing:send',
+  SUPPORT_VIEW: 'support:view',
+  SUPPORT_ACT: 'support:act',
 };
 
 const ALL_PERMISSIONS = Object.values(PERMISSIONS);
@@ -129,12 +135,27 @@ const ROLES = {
   support: {
     key: 'support',
     label: 'Support',
-    description: 'User support: view users, handle reports, basic user actions.',
+    description: 'User support: view users, handle reports, basic user actions, support tickets.',
     permissions: [
       PERMISSIONS.DASHBOARD_VIEW,
       PERMISSIONS.USER_VIEW,
       PERMISSIONS.USER_MANAGE,
       PERMISSIONS.CONTENT_MODERATION_VIEW,
+      PERMISSIONS.SUPPORT_VIEW,
+      PERMISSIONS.SUPPORT_ACT,
+    ],
+  },
+
+  // Phase 9 — email marketing campaigns.
+  marketing: {
+    key: 'marketing',
+    label: 'Marketing',
+    description: 'Compose, schedule and send marketing emails. Not a general admin.',
+    permissions: [
+      PERMISSIONS.DASHBOARD_VIEW,
+      PERMISSIONS.MARKETING_VIEW,
+      PERMISSIONS.MARKETING_SEND,
+      PERMISSIONS.USER_VIEW,
     ],
   },
 

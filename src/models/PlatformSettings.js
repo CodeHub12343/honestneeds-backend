@@ -26,6 +26,9 @@ const PlatformSettingsSchema = new mongoose.Schema(
         'notification_settings',
         'email_templates',
         'feature_flags',
+        // Phase 4 — footer social-media + external integration links.
+        // Shape: { social: [{platform, url}], programs: [{label, url, kind?}] }
+        'external_links',
       ],
     },
     value: {

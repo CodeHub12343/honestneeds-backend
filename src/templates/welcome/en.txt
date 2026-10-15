@@ -1,0 +1,7 @@
+Welcome, {{displayName}}.
+
+HonestNeed is a community where real people help their neighbors through real needs. Thank you for joining.
+
+Open HonestNeed: {{appUrl}}
+
+You received this because you signed up for HonestNeed. If this wasn't you, you can ignore this email.

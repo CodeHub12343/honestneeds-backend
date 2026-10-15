@@ -156,6 +156,49 @@ exports.reviewIdentity = async (req, res, next) => {
 };
 
 /**
+ * GET /api/verification/admin/:submissionId/persona-report
+ * Returns a (short-lived) Persona dashboard link for the submission's inquiry.
+ * The real report content is served by Persona and requires their admin SSO.
+ * This endpoint is a convenience + audit hook so staff don't have to copy
+ * inquiry ids by hand.
+ */
+exports.getPersonaReportLink = async (req, res, next) => {
+  try {
+    const IdentityVerification = require('../models/IdentityVerification');
+    const AuditLogger = require('../services/AuditLogger');
+    const submission = await IdentityVerification.findById(req.params.submissionId).lean();
+    if (!submission) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Submission not found' } });
+    }
+    if (!submission.persona_inquiry_id) {
+      return res.status(409).json({
+        success: false,
+        error: { code: 'NO_PERSONA_INQUIRY', message: 'This submission was not routed through Persona' },
+      });
+    }
+    const base = process.env.PERSONA_DASHBOARD_URL || 'https://app.withpersona.com';
+    const dashboard_url = `${base.replace(/\/+$/, '')}/dashboard/inquiries/${encodeURIComponent(submission.persona_inquiry_id)}`;
+
+    await AuditLogger.record({
+      req,
+      action: 'identity.persona_report_viewed',
+      entityType: 'IdentityVerification',
+      entityId: submission._id,
+      metadata: { inquiry_id: submission.persona_inquiry_id },
+    });
+
+    // Short-lived meta: the UI should re-request after a minute rather than
+    // persisting the URL in local storage or page history.
+    return res.json({
+      success: true,
+      data: { dashboard_url, expires_in_s: 60 },
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/**
  * POST /api/verification/admin/:userId/org-badge
  * Body: { badge: 'community_verified'|'nonprofit_verified', value: bool }
  */

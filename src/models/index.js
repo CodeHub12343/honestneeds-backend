@@ -34,6 +34,17 @@ module.exports = {
   // Sharing & Referral related
   Share: require('./Share'),
   ShareGrant: require('./ShareGrant'),
+  SocialConnection: require('./SocialConnection'),
+  PromoWallet: require('./PromoWallet'),
+  PromoWalletLedger: require('./PromoWalletLedger'),
+  VideoReward: require('./VideoReward'),
+  // Battle Buddies peer-match / groups / activities moved to
+  // https://battlebuddiesforvets.vercel.app — related models were removed.
+  // User.veteran_profile and Campaign.is_veteran_campaign stay on this
+  // platform and continue to drive campaign flagging and Sponsorship Pool
+  // veterans-first ordering.
+  SupportTicket: require('./SupportTicket').SupportTicket,
+  SupportMessage: require('./SupportTicket').SupportMessage,
   ShareTracking: require('./ShareTracking'),
   ShareWithdrawal: require('./ShareWithdrawal'),
   ReferralLink: require('./ReferralLink'),
