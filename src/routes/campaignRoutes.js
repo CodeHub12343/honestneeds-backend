@@ -123,6 +123,31 @@ router.post(
 );
 
 /**
+ * Phase 3 — owner-initiated "please upgrade my campaign" flow.
+ * Separate from the sponsor-asks-owner flow above; namespaced under
+ * /community-requests/* so routes do not shadow each other.
+ */
+router.get(
+  '/upgrade-requests/community',
+  CampaignUpgradeController.listCommunityRequests
+);
+router.get(
+  '/upgrade-requests/community/mine',
+  authMiddleware,
+  CampaignUpgradeController.listMyOwnerRequests
+);
+router.post(
+  '/upgrade-requests/community/:requestId/fulfil',
+  authMiddleware,
+  CampaignUpgradeController.fulfilOwnerRequest
+);
+router.post(
+  '/upgrade-requests/community/:requestId/cancel-owner',
+  authMiddleware,
+  CampaignUpgradeController.cancelOwnerRequest
+);
+
+/**
  * GET /campaigns/support-boosts/mine
  * The signed-in user's own community-boost history.
  */
@@ -899,6 +924,47 @@ router.get('/my-stats', authMiddleware, CampaignController.getUserStats || ((req
 }));
 
 /**
+ * GET /campaigns/platform-stats
+ * Public counters for the landing-page hero: live campaigns, distinct
+ * supporters, total funds moved (completed donations only). Cached in-process
+ * for 60s so the landing page is never slower than one DB round-trip.
+ */
+const Campaign = require('../models/Campaign');
+const Donation = require('../models/Donation');
+let _platformStatsCache = { at: 0, data: null };
+router.get('/platform-stats', async (req, res) => {
+  try {
+    const now = Date.now();
+    if (_platformStatsCache.data && now - _platformStatsCache.at < 60_000) {
+      return res.status(200).json({ success: true, data: _platformStatsCache.data });
+    }
+
+    const [campaignsCount, donationAgg, distinctSupporters] = await Promise.all([
+      Campaign.countDocuments({
+        deleted_at: { $in: [null, undefined] },
+        status: { $in: ['active', 'completed', 'published'] },
+      }),
+      Donation.aggregate([
+        { $match: { payment_status: 'completed' } },
+        { $group: { _id: null, total_cents: { $sum: '$amount' }, count: { $sum: 1 } } },
+      ]),
+      Donation.distinct('donor_id', { payment_status: 'completed' }),
+    ]);
+
+    const totalCents = (donationAgg[0] && donationAgg[0].total_cents) || 0;
+    const data = {
+      campaigns: campaignsCount || 0,
+      supporters: Array.isArray(distinctSupporters) ? distinctSupporters.filter(Boolean).length : 0,
+      funds_moved_cents: totalCents,
+    };
+    _platformStatsCache = { at: now, data };
+    res.status(200).json({ success: true, data });
+  } catch (err) {
+    res.status(500).json({ success: false, error: { code: 'STATS_ERROR', message: err.message } });
+  }
+});
+
+/**
  * GET /campaigns/related
  * Get campaigns related to a specified campaign (generic endpoint)
  * Query: 
@@ -1255,6 +1321,18 @@ router.post(
   authMiddleware,
   upgradeLimiter,
   CampaignUpgradeController.upgradeOwnCampaign
+);
+
+/**
+ * POST /campaigns/:id/request-upgrade
+ * Owner asks the community to upgrade THEIR campaign. Reuses upgradeLimiter
+ * (3/day/user) as a coarse cap; the service enforces 3/day/CAMPAIGN too.
+ */
+router.post(
+  '/:id/request-upgrade',
+  authMiddleware,
+  upgradeLimiter,
+  CampaignUpgradeController.createOwnerRequest
 );
 
 /**

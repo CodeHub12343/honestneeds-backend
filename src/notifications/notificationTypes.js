@@ -704,7 +704,8 @@ const REGISTRY = {
     title: () => 'Someone wants to boost your campaign',
     message: (d) =>
       `${actor(d)} would like to turn ${campaignName(d)} into a Share Campaign. Your approval is needed.`,
-    actionUrl: () => '/upgrade-requests',
+    // Deep-link to the owner-inbox tab where the approve/decline controls live.
+    actionUrl: () => '/upgrade-requests?tab=proposals',
   },
   campaign_upgrade_approved: {
     category: 'campaigns',

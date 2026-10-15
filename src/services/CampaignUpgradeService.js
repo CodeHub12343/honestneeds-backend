@@ -259,40 +259,61 @@ class CampaignUpgradeService {
     // The payout gate always evaluates the OWNER, whoever is asking.
     const payoutReadiness = await PayoutReadinessService.getReadiness(campaign.creator_id);
 
-    if (!payoutReadiness.ready) {
-      reasons.push({
-        code: isOwner ? payoutReadiness.code : 'OWNER_PAYOUT_NOT_READY',
-        message: isOwner
-          ? payoutReadiness.reason
-          : 'The campaign owner has not set up a payout method yet.',
-        blocking: true,
-        action: isOwner ? 'add_payment_method' : null,
-        action_url: isOwner
-          // NOTE: the payout-method screen is /settings (a single page devoted
-          // to payment methods). There is no /settings/payment-methods route.
-          ? `/settings?returnTo=${encodeURIComponent(
-              `/campaigns/${campaign.campaign_id}/upgrade`
-            )}`
-          : null,
-      });
-    }
-
+    // Any signed-in non-owner may propose an upgrade — there is no donor/sharer
+    // history requirement. The protection against an unsolicited upgrade is
+    // `requires_owner_approval` below: a sponsor's proposal never activates by
+    // itself, it waits on the campaign owner to approve it.
     let actorRole = 'viewer';
     let sponsorBasis = null;
     if (isOwner) {
       actorRole = 'creator';
-    } else {
+    } else if (actorId) {
+      actorRole = 'sponsor';
       const q = await this.getSponsorQualification(campaign, actorId);
-      if (q.qualified) {
-        actorRole = 'sponsor';
-        sponsorBasis = q.basis;
-      }
+      sponsorBasis = q.qualified ? q.basis : null;
+    }
+
+    // Only block the OWNER's own creator-flow upgrade on payout readiness —
+    // that path flips `is_paid_sharing_active: true` in the same transaction,
+    // so the payout method must be in place before the upgrade can land.
+    //
+    // A sponsor's proposal creates a pending request that does NOT activate
+    // paid sharing; the real gate for activation lives on the owner-approval
+    // endpoint and in ShareConfigService.enablePaidSharing(). Blocking the
+    // proposal here just hid an entire campaign from any sponsor whose owner
+    // hadn't finished payout setup yet — a chicken-and-egg problem.
+    if (!payoutReadiness.ready && actorRole === 'creator') {
+      reasons.push({
+        code: payoutReadiness.code,
+        message: payoutReadiness.reason,
+        blocking: true,
+        action: 'add_payment_method',
+        // NOTE: the payout-method screen is /settings (a single page devoted
+        // to payment methods). There is no /settings/payment-methods route.
+        action_url: `/settings?returnTo=${encodeURIComponent(
+          `/campaigns/${campaign.campaign_id}/upgrade`
+        )}`,
+      });
+    } else if (!payoutReadiness.ready && actorRole === 'sponsor') {
+      // Surface it to the sponsor as context, non-blocking. The UI can show a
+      // small note ("owner will need to add payouts before paid sharing turns
+      // on") without greying out the whole upgrade button.
+      reasons.push({
+        code: 'OWNER_PAYOUT_NOT_READY',
+        message:
+          'The owner has not set up a payout method yet. Your request will be delivered — paid sharing turns on once they add one and approve.',
+        blocking: false,
+        action: null,
+        action_url: null,
+      });
     }
 
     const pending = await CampaignUpgrade.findPendingForCampaign(campaign._id);
 
     return {
-      eligible: reasons.length === 0 && actorRole !== 'viewer',
+      // Non-blocking reasons (soft context notes) must not disqualify. Only
+      // reasons flagged `blocking: true` count against eligibility.
+      eligible: !reasons.some((r) => r.blocking) && actorRole !== 'viewer',
       reason_code: reasons[0]?.code || null,
       reasons,
       campaign: {
@@ -484,15 +505,13 @@ class CampaignUpgradeService {
           statusCode: 400,
         };
       }
-      const q = await this.getSponsorQualification(campaign, actorId);
-      if (!q.qualified) {
-        throw {
-          code: 'NOT_AUTHORIZED_SPONSOR',
-          message:
-            'Only supporters who have donated to or shared this campaign can request an upgrade for it.',
-          statusCode: 403,
-        };
-      }
+      // Any signed-in sponsor may propose an upgrade for someone else's
+      // campaign — the real protection against an unsolicited upgrade is
+      // further down: a direct sponsor proposal never activates on its own,
+      // it lands as a pending request that only the campaign OWNER can
+      // approve (see createPendingRequest below). A community-request
+      // fulfilment skips straight to activation because the owner already
+      // consented in advance by posting that request publicly.
     }
 
     // ── 2. Payout gate — evaluated against the OWNER, enforced on ACTIVATION
@@ -511,7 +530,21 @@ class CampaignUpgradeService {
     //
     // A CREATOR upgrade activates paid sharing in the same action, so for that
     // path this IS the activation and the gate still applies.
-    const requiresPayoutNow = initiatorType !== 'admin';
+    // Admin AND community-request sponsor fulfilments leave paid sharing OFF
+    // (is_paid_sharing_active: false below), so nothing accrues and there is
+    // no payout obligation yet. The owner must still add a payout method
+    // before they personally activate paid sharing — that gate lives in
+    // ShareConfigService.enablePaidSharing(). Blocking here would stop the
+    // tier change itself, which is the thing the owner publicly asked for.
+    //
+    // A sponsor's direct proposal creates a pending request (see step 3 below)
+    // that doesn't activate paid sharing either. It's the owner's eventual
+    // approval + ShareConfigService.enablePaidSharing() that activates. So we
+    // also skip this gate on direct sponsor proposals — the owner can add
+    // their payout method between the proposal landing in their inbox and
+    // their decision to approve it.
+    const requiresPayoutNow =
+      initiatorType === 'creator';
 
     const readiness = requiresPayoutNow
       ? await PayoutReadinessService.assertReady(ownerId, {
@@ -522,7 +555,13 @@ class CampaignUpgradeService {
         await PayoutReadinessService.getReadiness(ownerId);
 
     // ── 3. Sponsor path stops here — the owner must consent ───────────────
-    if (initiatorType === 'sponsor') {
+    //
+    // Exception: when fulfilling a community upgrade request, the owner has
+    // publicly consented in advance by posting the request. We skip the
+    // pending-approval step and continue straight to activation — same shape
+    // as the admin path (paid sharing is still left OFF until the owner opts
+    // in via the pay-sharers-directly agreement).
+    if (initiatorType === 'sponsor' && !params.fromCommunityRequest) {
       return this.createPendingRequest({
         campaign,
         actorId,
@@ -878,6 +917,32 @@ class CampaignUpgradeService {
   }) {
     const now = new Date();
 
+    // Phase 3 — admin pre-notification (per decision §14.14 of the roadmap).
+    // When an admin triggers the upgrade, the owner must be told BEFORE the
+    // campaign is mutated. This runs synchronously; failure is logged but
+    // does NOT abort the upgrade — the owner would be worse off if a
+    // notification outage blocked their campaign change. The followup
+    // `campaign_upgraded` notification at the end still fires.
+    if (initiatorType === 'admin') {
+      await this.safeNotify({
+        userId: campaign.creator_id,
+        type: 'admin_upgrade_notice',
+        data: {
+          campaign_id: campaign.campaign_id,
+          campaign_title: campaign.title,
+          actor_id: String(actorId),
+          upgrade_id: String(upgradeDoc._id),
+          // One-click paid-sharing activation link. Paid sharing lands OFF
+          // and requires the owner to re-accept the pay-sharers-directly
+          // agreement — the agreement cannot be accepted by the admin on
+          // their behalf, so the campaign type flips while paid sharing stays
+          // off until the owner opts in explicitly.
+          activation_url: `/dashboard/campaigns/${encodeURIComponent(campaign.campaign_id)}/share-activation?via=admin_upgrade`,
+          paid_sharing_will_be_off: true,
+        },
+      });
+    }
+
     const nextShareConfig = {
       ...(campaign.share_config?.toObject ? campaign.share_config.toObject() : campaign.share_config || {}),
       total_budget: normalized.total_budget,
@@ -993,6 +1058,63 @@ class CampaignUpgradeService {
     ]);
 
     return { items, total, page, limit };
+  }
+
+  /**
+   * Veteran one-free-upgrade entitlement (TASK-7.11).
+   *
+   * A verified veteran (verified_via ∈ {idme, admin}) may skip the upgrade
+   * charge exactly once — ever. The flag `veteran_profile.free_campaign_
+   * upgrade_used` is set in the same atomic update that returns the right
+   * to claim, so two concurrent requests can't both win. The caller stores
+   * the audit record for the specific campaign the entitlement paid for.
+   *
+   * Returns `{ granted: true }` if this call just consumed the entitlement,
+   * `{ granted: false, reason }` otherwise.
+   */
+  static async claimVeteranFreeUpgrade({ userId }) {
+    const User = require('../models/User');
+    const AuditLogger = require('./AuditLogger');
+
+    const user = await User.findById(userId).select('veteran_profile');
+    if (!user) return { granted: false, reason: 'USER_NOT_FOUND' };
+    const vp = user.veteran_profile || {};
+    if (!vp.is_veteran) return { granted: false, reason: 'NOT_A_VETERAN' };
+    if (!['idme', 'admin'].includes(vp.verified_via)) {
+      return { granted: false, reason: 'VERIFICATION_INSUFFICIENT' };
+    }
+    if (vp.free_campaign_upgrade_used) {
+      return { granted: false, reason: 'ALREADY_USED' };
+    }
+
+    const now = new Date();
+    const updated = await User.findOneAndUpdate(
+      {
+        _id: userId,
+        'veteran_profile.is_veteran': true,
+        'veteran_profile.verified_via': { $in: ['idme', 'admin'] },
+        'veteran_profile.free_campaign_upgrade_used': { $ne: true },
+      },
+      {
+        $set: {
+          'veteran_profile.free_campaign_upgrade_used': true,
+          'veteran_profile.free_campaign_upgrade_used_at': now,
+        },
+      },
+      { new: true }
+    );
+    if (!updated) return { granted: false, reason: 'ALREADY_USED' };
+
+    await AuditLogger.record({
+      actor: { userId },
+      action: 'veteran.free_upgrade.claimed',
+      entityType: 'User',
+      entityId: userId,
+      description: 'Veteran one-free-upgrade entitlement consumed',
+      metadata: { idempotency_key: `veteran_free_upgrade:${userId}` },
+    });
+
+    return { granted: true, used_at: now };
   }
 
   /**
